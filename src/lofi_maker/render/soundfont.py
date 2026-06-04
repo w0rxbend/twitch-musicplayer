@@ -74,15 +74,20 @@ def _render_via_cli(mid_path: Path, wav_path: Path, sf2: Path, sample_rate: int)
     result = subprocess.run(
         [
             "fluidsynth",
-            "-ni",                          # no interactive, no audio output
-            "-F", str(wav_path),            # render to file
+            "-ni",                          # non-interactive, no audio playback
+            "-F", str(wav_path),            # render directly to file
             "-r", str(sample_rate),
             str(sf2),
             str(mid_path),
         ],
-        capture_output=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         timeout=300,
     )
     if not wav_path.exists() or wav_path.stat().st_size == 0:
-        stderr = result.stderr.decode(errors="replace")
-        raise RuntimeError(f"fluidsynth render failed:\n{stderr}")
+        # Re-run with captured output only on failure so we can surface the reason
+        diag = subprocess.run(
+            ["fluidsynth", "-ni", "-F", str(wav_path), "-r", str(sample_rate), str(sf2), str(mid_path)],
+            capture_output=True, timeout=300,
+        )
+        raise RuntimeError(f"fluidsynth render failed:\n{diag.stderr.decode(errors='replace')}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import subprocess
+import warnings
 from pathlib import Path
 import numpy as np
 import soundfile as sf
@@ -17,7 +18,10 @@ def normalize_lufs(audio: np.ndarray, sr: int, target_lufs: float = -14.0) -> np
         loudness = meter.integrated_loudness(audio_2d.astype(np.float64))
         if not np.isfinite(loudness):
             return audio
-        normalized = pyln.normalize.loudness(audio_2d.astype(np.float64), loudness, target_lufs)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            normalized = pyln.normalize.loudness(audio_2d.astype(np.float64), loudness, target_lufs)
+        normalized = np.clip(normalized, -1.0, 1.0)
         return normalized[:, 0].astype(np.float32) if audio.ndim == 1 else normalized.astype(np.float32)
     except ImportError:
         # Simple peak normalisation fallback
