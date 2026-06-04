@@ -127,6 +127,117 @@ def generate_random(
         )
 
 
+# ------------------------------------------------------------------ #
+# songgen generate-ambient
+# ------------------------------------------------------------------ #
+
+@cli.command("generate-ambient")
+@click.option("--prompt", default=None, help="Text prompt for MusicGen")
+@click.option("--preset", default="ambient_lofi", show_default=True,
+              help="Preset used for prompt color and lofi effects")
+@click.option("--duration", default=12.0, show_default=True,
+              help="Final duration in seconds. MusicGen is chunked above 30s.")
+@click.option("--segment-duration", default=12.0, show_default=True,
+              help="MusicGen chunk length in seconds, capped at 30")
+@click.option("--crossfade", default=1.0, show_default=True,
+              help="Crossfade between generated chunks")
+@click.option("--output", default="mp3", show_default=True, help="Comma-separated: wav,mp3")
+@click.option("--seed", type=int, default=None)
+@click.option("--out-dir", "out_dir", type=click.Path(), default=".", show_default=True)
+@click.option("--model", default="facebook/musicgen-small", show_default=True)
+@click.option("--runtime", type=click.Choice(["transformers", "openvino"]), default="transformers",
+              show_default=True)
+@click.option("--device", default="cpu", show_default=True,
+              help="Torch device for transformers runtime")
+@click.option("--openvino-device", default="CPU", show_default=True,
+              help="OpenVINO device for openvino runtime")
+@click.option("--openvino-model-dir", type=click.Path(), default=None,
+              help="Directory for converted OpenVINO IR files")
+@click.option("--guidance-scale", default=3.0, show_default=True)
+@click.option("--temperature", default=1.0, show_default=True)
+@click.option("--top-k", default=250, show_default=True)
+def generate_ambient(
+    prompt: Optional[str],
+    preset: str,
+    duration: float,
+    segment_duration: float,
+    crossfade: float,
+    output: str,
+    seed: Optional[int],
+    out_dir: str,
+    model: str,
+    runtime: str,
+    device: str,
+    openvino_device: str,
+    openvino_model_dir: Optional[str],
+    guidance_scale: float,
+    temperature: float,
+    top_k: int,
+) -> None:
+    """Generate lofi ambient audio with facebook/musicgen-small."""
+    from .ai.musicgen import MusicGenSmallBackend
+    from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+    from .presets.loader import load_preset
+    from .render.effects import apply_lofi_effects
+    from .render.export import export_audio
+
+    try:
+        preset_cfg = load_preset(preset)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    backend = MusicGenSmallBackend(
+        model_id=model,
+        runtime=runtime,
+        device=device,
+        openvino_model_dir=openvino_model_dir,
+        openvino_device=openvino_device,
+        segment_seconds=segment_duration,
+    )
+    if not backend.available:
+        click.echo("Error: MusicGen dependencies are not installed.", err=True)
+        click.echo(f"Install MusicGen support: {_optional_dependency_install_hint('musicgen')}", err=True)
+        if runtime == "openvino":
+            click.echo(f"Install OpenVINO support: {_optional_dependency_install_hint('musicgen-openvino')}", err=True)
+        sys.exit(1)
+
+    final_prompt = build_ambient_prompt(preset_cfg, prompt)
+    formats = [f.strip() for f in output.split(",") if f.strip()]
+    if not formats:
+        click.echo("Error: --output must include at least one format", err=True)
+        sys.exit(1)
+
+    click.echo(f"Generating lofi ambient audio with {model} ({runtime})")
+    click.echo(f"  Duration: {duration:.1f}s  Segment: {min(segment_duration, 30.0):.1f}s")
+    click.echo(f"  Prompt: {final_prompt}")
+
+    try:
+        result = generate_lofi_ambient_audio(
+            backend=backend,
+            prompt=final_prompt,
+            duration_seconds=duration,
+            seed=seed,
+            segment_seconds=segment_duration,
+            crossfade_seconds=crossfade,
+            guidance_scale=guidance_scale,
+            temperature=temperature,
+            top_k=top_k,
+        )
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    audio = apply_lofi_effects(result.audio, result.sample_rate, preset_cfg.effects)
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    suffix = f"seed_{seed}" if seed is not None else str(int(time.time()))
+    output_name = f"{preset}_musicgen_{suffix}"
+    for fmt, path in export_audio(audio, result.sample_rate, out_path / output_name, formats=formats).items():
+        click.echo(f"  {fmt.upper():<5} → {path}")
+    click.echo(f"  Segments: {result.segment_count}")
+
+
 def _generate_preset_audio(
     preset_name: str,
     duration: float,
@@ -340,6 +451,10 @@ def _write_temp_audio(audio, sr: int, suffix: str) -> Path:
 def _optional_dependency_install_hint(extra: str) -> str:
     if extra == "melody" and sys.version_info >= (3, 12):
         return "Basic Pitch requires Python 3.10/3.11; Python 3.12+ uses the built-in librosa fallback"
+    if extra == "musicgen-openvino":
+        if Path("uv.lock").exists():
+            return "pipx run uv sync --extra musicgen-openvino"
+        return f"{sys.executable} -m pip install -e '.[musicgen-openvino]'"
     if Path("uv.lock").exists():
         return f"pipx run uv sync --extra {extra}"
     return f"{sys.executable} -m pip install -e '.[{extra}]'"

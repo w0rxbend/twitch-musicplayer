@@ -252,6 +252,18 @@ Quantization:
 
 ## Implementation Roadmap
 
+### Implemented First Slice
+
+The repository now includes a first MusicGen Small integration for lofi ambient generation:
+
+```text
+songgen generate-ambient --duration 12 --output mp3
+songgen generate-ambient --prompt "slow dusty ambient lofi pads, felt piano, tape hiss" --duration 30 --output wav,mp3
+songgen generate-ambient --runtime openvino --duration 12 --segment-duration 12
+```
+
+The default runtime uses Hugging Face Transformers on CPU. The OpenVINO runtime converts and caches `facebook/musicgen-small` IR files under `models/musicgen-small-openvino`, which is intentionally ignored by git because the generated model files are large.
+
 ### Phase 1: Working ONNX/OpenVINO Prototype
 
 Effort: 3-5 days.

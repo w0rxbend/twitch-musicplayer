@@ -7,9 +7,12 @@ import soundfile as sf
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from .analysis.melody_extractor import extract_melody
 from .analysis.song_analyzer import analyze_song
+from .ai.musicgen import MusicGenSmallBackend
+from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
 from .core.lofi_arranger import build_cover_context, cover_effects_from_context, from_preset
 from .presets.loader import list_presets, load_preset
 from .render.effects import apply_lofi_effects
@@ -34,6 +37,30 @@ def _get_backend(use_transformer: bool = False, model_id: Optional[str] = None):
     return RuleBasedBackend()
 
 
+def _get_audio_backend(
+    runtime: str = "transformers",
+    model_id: str = "facebook/musicgen-small",
+    device: str = "cpu",
+    openvino_device: str = "CPU",
+    openvino_model_dir: Optional[str] = None,
+    segment_seconds: float = 12.0,
+):
+    key = (
+        f"audio:{runtime}:{model_id}:{device}:{openvino_device}:"
+        f"{openvino_model_dir or ''}:{segment_seconds:.2f}"
+    )
+    if key not in _backend_cache:
+        _backend_cache[key] = MusicGenSmallBackend(
+            model_id=model_id,
+            runtime=runtime,
+            device=device,
+            openvino_device=openvino_device,
+            openvino_model_dir=openvino_model_dir,
+            segment_seconds=segment_seconds,
+        )
+    return _backend_cache[key]
+
+
 # ------------------------------------------------------------------ #
 # Schemas
 # ------------------------------------------------------------------ #
@@ -45,6 +72,24 @@ class GeneratePresetRequest(BaseModel):
     seed: Optional[int] = None
     use_transformer: bool = False
     model_id: Optional[str] = None
+
+
+class GenerateAmbientRequest(BaseModel):
+    prompt: Optional[str] = None
+    preset: str = "ambient_lofi"
+    duration_seconds: float = 12.0
+    segment_seconds: float = 12.0
+    crossfade_seconds: float = 1.0
+    output: list[str] = ["mp3"]
+    seed: Optional[int] = None
+    model_id: str = "facebook/musicgen-small"
+    runtime: str = "transformers"
+    device: str = "cpu"
+    openvino_device: str = "CPU"
+    openvino_model_dir: Optional[str] = None
+    guidance_scale: float = 3.0
+    temperature: float = 1.0
+    top_k: int = 250
 
 
 # ------------------------------------------------------------------ #
@@ -68,6 +113,53 @@ async def generate_preset(req: GeneratePresetRequest):
     midi = backend.generate_midi(ctx)
 
     return _render_and_respond(midi, preset.effects, req.preset, req.output)
+
+
+@app.post("/generate/ambient")
+async def generate_ambient(req: GenerateAmbientRequest):
+    if req.runtime not in {"transformers", "openvino"}:
+        raise HTTPException(400, "runtime must be 'transformers' or 'openvino'")
+    if req.duration_seconds <= 0:
+        raise HTTPException(400, "duration_seconds must be positive")
+
+    try:
+        preset = load_preset(req.preset)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Preset '{req.preset}' not found")
+
+    backend = _get_audio_backend(
+        runtime=req.runtime,
+        model_id=req.model_id,
+        device=req.device,
+        openvino_device=req.openvino_device,
+        openvino_model_dir=req.openvino_model_dir,
+        segment_seconds=req.segment_seconds,
+    )
+    if not backend.available:
+        raise HTTPException(503, "MusicGen dependencies are not installed")
+
+    prompt = build_ambient_prompt(preset, req.prompt)
+
+    try:
+        result = await run_in_threadpool(
+            generate_lofi_ambient_audio,
+            backend,
+            prompt,
+            req.duration_seconds,
+            req.seed,
+            req.segment_seconds,
+            req.crossfade_seconds,
+            req.guidance_scale,
+            req.temperature,
+            req.top_k,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    audio = apply_lofi_effects(result.audio, result.sample_rate, preset.effects)
+    return _render_audio_and_respond(audio, result.sample_rate, "musicgen_ambient", req.output)
 
 
 @app.post("/remake/lofi")
@@ -109,6 +201,21 @@ def _render_and_respond(midi, effects_cfg, stem_name: str, formats: list[str]) -
         audio = apply_lofi_effects(audio, sr, effects_cfg)
         results = export_audio(audio, sr, Path(tmpdir) / stem_name, formats=formats)
 
+        for fmt in ("mp3", "wav"):
+            if fmt in results:
+                content = results[fmt].read_bytes()
+                return Response(
+                    content=content,
+                    media_type=f"audio/{fmt}",
+                    headers={"Content-Disposition": f'attachment; filename="{stem_name}.{fmt}"'},
+                )
+
+    raise HTTPException(500, "Export produced no output")
+
+
+def _render_audio_and_respond(audio, sr: int, stem_name: str, formats: list[str]) -> Response:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        results = export_audio(audio, sr, Path(tmpdir) / stem_name, formats=formats)
         for fmt in ("mp3", "wav"):
             if fmt in results:
                 content = results[fmt].read_bytes()

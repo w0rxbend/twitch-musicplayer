@@ -41,6 +41,7 @@ Thumbs.db
 output/
 mp3/
 ncs_music/
+models/
 *.wav
 *.mp3
 *.mid
