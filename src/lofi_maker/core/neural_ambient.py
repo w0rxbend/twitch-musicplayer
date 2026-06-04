@@ -8,7 +8,7 @@ from ..presets.models import LofiPreset
 from ..render.audio_mix import crossfade_segments, fit_duration
 
 DEFAULT_AMBIENT_PROMPT = (
-    "slow ambient lofi, warm Rhodes chords, soft felt piano, "
+    "slow ambient lofi instrumental, warm Rhodes chords, soft felt piano, "
     "subtle tape hiss, wide reverb, mellow bass, no vocals, no lead vocal"
 )
 

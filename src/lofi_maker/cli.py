@@ -1,9 +1,12 @@
 from __future__ import annotations
+import gc
+import json
 import logging
 import secrets
 import sys
 import time
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -203,9 +206,10 @@ def generate_ambient(
         sys.exit(1)
 
     final_prompt = build_ambient_prompt(preset_cfg, prompt)
-    formats = [f.strip() for f in output.split(",") if f.strip()]
-    if not formats:
-        click.echo("Error: --output must include at least one format", err=True)
+    try:
+        formats = _parse_audio_formats(output, allowed={"wav", "mp3"})
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
     click.echo(f"Generating lofi ambient audio with {model} ({runtime})")
@@ -236,6 +240,296 @@ def generate_ambient(
     for fmt, path in export_audio(audio, result.sample_rate, out_path / output_name, formats=formats).items():
         click.echo(f"  {fmt.upper():<5} → {path}")
     click.echo(f"  Segments: {result.segment_count}")
+
+
+# ------------------------------------------------------------------ #
+# songgen generate-ambient-batch
+# ------------------------------------------------------------------ #
+
+@cli.command("generate-ambient-batch")
+@click.option("--prompt", default=None, help="Text prompt for MusicGen")
+@click.option("--preset", default="ambient_lofi", show_default=True,
+              help="Preset used for prompt color and lofi effects")
+@click.option("--random-presets", is_flag=True, default=False,
+              help="Randomly choose from all available lofi presets for each track")
+@click.option("--run-hours", default=24.0, show_default=True,
+              help="How long the supervised run should keep generating")
+@click.option("--max-tracks", type=int, default=None,
+              help="Optional hard cap on successful tracks")
+@click.option("--duration", default=180.0, show_default=True,
+              help="Duration of each generated track in seconds")
+@click.option("--segment-duration", default=30.0, show_default=True,
+              help="MusicGen chunk length in seconds, capped at 30")
+@click.option("--crossfade", default=2.0, show_default=True,
+              help="Crossfade between generated chunks")
+@click.option("--output", default="mp3", show_default=True, help="Comma-separated: wav,mp3")
+@click.option("--out-dir", "out_dir", type=click.Path(), default=None,
+              help="Output directory. Defaults to output/ambient_batch_TIMESTAMP")
+@click.option("--manifest", type=click.Path(), default=None,
+              help="JSONL manifest path. Defaults to OUT_DIR/ambient_batch_manifest.jsonl")
+@click.option("--model", default="facebook/musicgen-small", show_default=True)
+@click.option("--runtime", type=click.Choice(["transformers", "openvino"]), default="openvino",
+              show_default=True)
+@click.option("--device", default="cpu", show_default=True,
+              help="Torch device for transformers runtime")
+@click.option("--openvino-device", default="CPU", show_default=True,
+              help="OpenVINO device for openvino runtime")
+@click.option("--openvino-model-dir", type=click.Path(), default=None,
+              help="Directory for converted OpenVINO IR files")
+@click.option("--guidance-scale", default=3.0, show_default=True)
+@click.option("--temperature", default=1.0, show_default=True)
+@click.option("--top-k", default=250, show_default=True)
+@click.option("--sleep-on-error", default=30.0, show_default=True,
+              help="Seconds to wait after a failed track before continuing")
+@click.option("--stop-on-error", is_flag=True, default=False,
+              help="Stop the run after the first failed track")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Print the run plan without loading the model")
+def generate_ambient_batch(
+    prompt: Optional[str],
+    preset: str,
+    random_presets: bool,
+    run_hours: float,
+    max_tracks: Optional[int],
+    duration: float,
+    segment_duration: float,
+    crossfade: float,
+    output: str,
+    out_dir: Optional[str],
+    manifest: Optional[str],
+    model: str,
+    runtime: str,
+    device: str,
+    openvino_device: str,
+    openvino_model_dir: Optional[str],
+    guidance_scale: float,
+    temperature: float,
+    top_k: int,
+    sleep_on_error: float,
+    stop_on_error: bool,
+    dry_run: bool,
+) -> None:
+    """Generate lofi ambient tracks continuously for a supervised run."""
+    from .ai.musicgen import MusicGenSmallBackend
+    from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+    from .presets.loader import list_presets, load_preset
+    from .render.effects import apply_lofi_effects
+    from .render.export import export_audio
+
+    if run_hours <= 0:
+        click.echo("Error: --run-hours must be greater than 0", err=True)
+        sys.exit(1)
+    if max_tracks is not None and max_tracks < 1:
+        click.echo("Error: --max-tracks must be at least 1", err=True)
+        sys.exit(1)
+    if duration <= 0:
+        click.echo("Error: --duration must be greater than 0", err=True)
+        sys.exit(1)
+    if segment_duration <= 0:
+        click.echo("Error: --segment-duration must be greater than 0", err=True)
+        sys.exit(1)
+    if crossfade < 0:
+        click.echo("Error: --crossfade cannot be negative", err=True)
+        sys.exit(1)
+    if sleep_on_error < 0:
+        click.echo("Error: --sleep-on-error cannot be negative", err=True)
+        sys.exit(1)
+
+    try:
+        if random_presets:
+            preset_names = list_presets()
+            if not preset_names:
+                click.echo("Error: no lofi presets found", err=True)
+                sys.exit(1)
+            preset_choices = [(name, load_preset(name)) for name in preset_names]
+        else:
+            preset_choices = [(preset, load_preset(preset))]
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        formats = _parse_audio_formats(output, allowed={"wav", "mp3"})
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    started_at = datetime.now()
+    out_path = Path(out_dir) if out_dir else Path("output") / f"ambient_batch_{started_at:%Y%m%d_%H%M%S}"
+    manifest_path = Path(manifest) if manifest else out_path / "ambient_batch_manifest.jsonl"
+    first_prompt = build_ambient_prompt(preset_choices[0][1], prompt)
+    deadline = time.monotonic() + run_hours * 3600.0
+
+    click.echo("Ambient batch generation plan")
+    click.echo(f"  Runtime: {runtime}  Model: {model}")
+    if runtime == "openvino":
+        click.echo(f"  OpenVINO device: {openvino_device}")
+    else:
+        click.echo(f"  Torch device: {device}")
+    click.echo(f"  Run length: {run_hours:g}h")
+    click.echo(f"  Track duration: {duration:.1f}s  Segment: {min(segment_duration, 30.0):.1f}s")
+    if random_presets:
+        click.echo(f"  Presets: random from {len(preset_choices)} available lofi presets")
+    else:
+        click.echo(f"  Preset: {preset_choices[0][0]}")
+    click.echo(f"  Output: {','.join(formats)}")
+    click.echo(f"  Out dir: {out_path}")
+    click.echo(f"  Manifest: {manifest_path}")
+    click.echo(f"  Prompt template: {prompt.strip() if prompt and prompt.strip() else 'default ambient prompt'}")
+    click.echo(f"  First prompt example: {first_prompt}")
+
+    if dry_run:
+        return
+
+    out_path.mkdir(parents=True, exist_ok=True)
+    _append_jsonl(
+        manifest_path,
+        {
+            "event": "run_started",
+            "started_at": _utc_now_iso(),
+            "run_hours": run_hours,
+            "max_tracks": max_tracks,
+            "track_duration_seconds": duration,
+            "segment_duration_seconds": min(segment_duration, 30.0),
+            "crossfade_seconds": crossfade,
+            "formats": formats,
+            "model_id": model,
+            "runtime": runtime,
+            "device": device,
+            "openvino_device": openvino_device,
+            "openvino_model_dir": openvino_model_dir,
+            "base_prompt": prompt,
+            "random_presets": random_presets,
+            "preset": None if random_presets else preset_choices[0][0],
+            "preset_count": len(preset_choices),
+            "presets": [name for name, _ in preset_choices],
+        },
+    )
+
+    backend = MusicGenSmallBackend(
+        model_id=model,
+        runtime=runtime,
+        device=device,
+        openvino_model_dir=openvino_model_dir,
+        openvino_device=openvino_device,
+        segment_seconds=segment_duration,
+    )
+    if not backend.available:
+        click.echo("Error: MusicGen dependencies are not installed.", err=True)
+        click.echo(f"Install MusicGen support: {_optional_dependency_install_hint('musicgen')}", err=True)
+        if runtime == "openvino":
+            click.echo(f"Install OpenVINO support: {_optional_dependency_install_hint('musicgen-openvino')}", err=True)
+        sys.exit(1)
+
+    ok_count = 0
+    failed_count = 0
+    attempt = 0
+
+    try:
+        while time.monotonic() < deadline:
+            if max_tracks is not None and ok_count >= max_tracks:
+                break
+
+            attempt += 1
+            seed = secrets.randbelow(2_147_483_647)
+            track_preset, track_preset_cfg = secrets.choice(preset_choices)
+            track_prompt = build_ambient_prompt(track_preset_cfg, prompt)
+            output_name = f"{track_preset}_musicgen_{attempt:04d}_seed_{seed}"
+            track_started = time.monotonic()
+            click.echo()
+            click.echo(f"[{_local_now_label()}] Track attempt {attempt} preset={track_preset} (seed={seed})")
+
+            try:
+                result = generate_lofi_ambient_audio(
+                    backend=backend,
+                    prompt=track_prompt,
+                    duration_seconds=duration,
+                    seed=seed,
+                    segment_seconds=segment_duration,
+                    crossfade_seconds=crossfade,
+                    guidance_scale=guidance_scale,
+                    temperature=temperature,
+                    top_k=top_k,
+                )
+                audio = apply_lofi_effects(result.audio, result.sample_rate, track_preset_cfg.effects)
+                exported = export_audio(audio, result.sample_rate, out_path / output_name, formats=formats)
+                elapsed = time.monotonic() - track_started
+                ok_count += 1
+
+                for fmt, path in exported.items():
+                    click.echo(f"  {fmt.upper():<5} → {path}")
+                click.echo(f"  Done in {elapsed / 60.0:.1f} min  Segments: {result.segment_count}")
+
+                _append_jsonl(
+                    manifest_path,
+                    {
+                        "event": "track_completed",
+                        "completed_at": _utc_now_iso(),
+                        "attempt": attempt,
+                        "track_index": ok_count,
+                        "preset": track_preset,
+                        "prompt": track_prompt,
+                        "seed": seed,
+                        "elapsed_seconds": elapsed,
+                        "duration_seconds": duration,
+                        "segment_count": result.segment_count,
+                        "sample_rate": result.sample_rate,
+                        "outputs": {fmt: str(path) for fmt, path in exported.items()},
+                        "output_name": output_name,
+                    },
+                )
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                elapsed = time.monotonic() - track_started
+                failed_count += 1
+                click.echo(f"  Failed after {elapsed / 60.0:.1f} min: {exc}", err=True)
+                _append_jsonl(
+                    manifest_path,
+                    {
+                        "event": "track_failed",
+                        "failed_at": _utc_now_iso(),
+                        "attempt": attempt,
+                        "preset": track_preset,
+                        "prompt": track_prompt,
+                        "seed": seed,
+                        "elapsed_seconds": elapsed,
+                        "error": repr(exc),
+                    },
+                )
+                if stop_on_error:
+                    raise click.ClickException(str(exc)) from exc
+                if time.monotonic() < deadline and sleep_on_error > 0:
+                    time.sleep(min(sleep_on_error, max(0.0, deadline - time.monotonic())))
+            finally:
+                gc.collect()
+    except KeyboardInterrupt:
+        click.echo("\nInterrupted; writing run summary.")
+        _append_jsonl(
+            manifest_path,
+            {
+                "event": "run_interrupted",
+                "interrupted_at": _utc_now_iso(),
+                "attempts": attempt,
+                "completed_tracks": ok_count,
+                "failed_tracks": failed_count,
+            },
+        )
+        sys.exit(130)
+
+    _append_jsonl(
+        manifest_path,
+        {
+            "event": "run_finished",
+            "finished_at": _utc_now_iso(),
+            "attempts": attempt,
+            "completed_tracks": ok_count,
+            "failed_tracks": failed_count,
+            "manifest": str(manifest_path),
+        },
+    )
+    click.echo()
+    click.echo(f"Batch finished. Completed: {ok_count}. Failed: {failed_count}. Manifest: {manifest_path}")
 
 
 def _generate_preset_audio(
@@ -446,6 +740,34 @@ def _write_temp_audio(audio, sr: int, suffix: str) -> Path:
         path = Path(tmp.name)
     sf.write(str(path), audio, sr)
     return path
+
+
+def _parse_audio_formats(output: str, allowed: set[str]) -> list[str]:
+    formats = list(dict.fromkeys(f.strip().lower() for f in output.split(",") if f.strip()))
+    if not formats:
+        raise ValueError("--output must include at least one format")
+
+    unsupported = [fmt for fmt in formats if fmt not in allowed]
+    if unsupported:
+        expected = ",".join(sorted(allowed))
+        found = ",".join(unsupported)
+        raise ValueError(f"unsupported --output format(s): {found}. Expected: {expected}")
+
+    return formats
+
+
+def _append_jsonl(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _local_now_label() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _optional_dependency_install_hint(extra: str) -> str:

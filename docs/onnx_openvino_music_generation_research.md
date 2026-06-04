@@ -260,9 +260,13 @@ The repository now includes a first MusicGen Small integration for lofi ambient 
 songgen generate-ambient --duration 12 --output mp3
 songgen generate-ambient --prompt "slow dusty ambient lofi pads, felt piano, tape hiss" --duration 30 --output wav,mp3
 songgen generate-ambient --runtime openvino --duration 12 --segment-duration 12
+songgen generate-ambient-batch --run-hours 24 --runtime openvino --duration 180 --segment-duration 30 --random-presets
+scripts/run_ambient_generation_24h.sh output/ambient_24h
 ```
 
 The default runtime uses Hugging Face Transformers on CPU. The OpenVINO runtime converts and caches `facebook/musicgen-small` IR files under `models/musicgen-small-openvino`, which is intentionally ignored by git because the generated model files are large.
+
+For long unattended runs, use `generate-ambient-batch` or the `scripts/run_ambient_generation_24h.sh` launcher. The batch command keeps one backend process warm, catches per-track failures, writes every result to `ambient_batch_manifest.jsonl`, and stops when the time window or optional `--max-tracks` cap is reached. Add `--random-presets` to pick a different lofi preset for each track. The launcher starts the batch command with `nohup`, enables random presets by default, and writes `generator.log`, `generator.pid`, and the manifest into the output directory.
 
 ### Phase 1: Working ONNX/OpenVINO Prototype
 
