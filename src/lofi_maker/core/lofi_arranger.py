@@ -109,17 +109,72 @@ def _fit_melody_to_cover(ctx: MusicContext) -> list[tuple[float, float, int]] | 
         return None
 
     source_bpm = ctx.source_bpm or ctx.bpm
-    ratio = source_bpm / ctx.bpm if ctx.bpm > 0 else 1.0
-    fitted: list[tuple[float, float, int]] = []
+    ratio = _tempo_ratio(source_bpm, ctx.bpm)
+    beat = 60.0 / ctx.bpm if ctx.bpm > 0 else 0.75
+    grid = beat / 4.0
+    fitted_by_slot: dict[int, tuple[float, float, int]] = {}
 
     for start, end, pitch in ctx.melody_notes:
         new_start = max(0.0, float(start) * ratio)
         new_end = max(new_start + 0.08, float(end) * ratio)
         if new_start >= ctx.duration_seconds:
             continue
-        fitted.append((new_start, min(new_end, ctx.duration_seconds), int(pitch)))
 
+        q_start = round(new_start / grid) * grid
+        q_end = round(new_end / grid) * grid
+        q_start = max(0.0, min(q_start, ctx.duration_seconds))
+        q_end = min(ctx.duration_seconds, max(q_start + grid * 0.85, q_end))
+        q_pitch = _snap_pitch_to_key(int(pitch), ctx)
+        slot = int(round(q_start / grid))
+        candidate = (q_start, q_end, q_pitch)
+
+        previous = fitted_by_slot.get(slot)
+        if previous is None or (candidate[1] - candidate[0]) > (previous[1] - previous[0]):
+            fitted_by_slot[slot] = candidate
+
+    fitted = sorted(fitted_by_slot.values(), key=lambda note: (note[0], note[2]))
+    fitted = _merge_cover_melody_notes(fitted, max_gap=grid * 1.25)
     return fitted or None
+
+
+def _tempo_ratio(source_bpm: float, cover_bpm: float) -> float:
+    if source_bpm <= 0 or cover_bpm <= 0:
+        return 1.0
+
+    ratio = source_bpm / cover_bpm
+    while ratio > 1.5:
+        ratio *= 0.5
+    while ratio < 0.75:
+        ratio *= 2.0
+    return ratio
+
+
+def _snap_pitch_to_key(pitch: int, ctx: MusicContext) -> int:
+    scale = [0, 2, 3, 5, 7, 8, 10] if ctx.is_minor else [0, 2, 4, 5, 7, 9, 11]
+    root = _NOTES.index(ctx.root_note) if ctx.root_note in _NOTES else 0
+    allowed = {(root + step) % 12 for step in scale}
+    if pitch % 12 in allowed:
+        return pitch
+
+    candidates = [pitch + offset for offset in (-2, -1, 1, 2) if (pitch + offset) % 12 in allowed]
+    if not candidates:
+        return pitch
+    return min(candidates, key=lambda candidate: (abs(candidate - pitch), candidate))
+
+
+def _merge_cover_melody_notes(
+    notes: list[tuple[float, float, int]],
+    max_gap: float,
+) -> list[tuple[float, float, int]]:
+    merged: list[tuple[float, float, int]] = []
+    for start, end, pitch in notes:
+        if merged:
+            prev_start, prev_end, prev_pitch = merged[-1]
+            if abs(prev_pitch - pitch) <= 1 and start <= prev_end + max_gap:
+                merged[-1] = (prev_start, max(prev_end, end), round((prev_pitch + pitch) / 2))
+                continue
+        merged.append((start, end, pitch))
+    return merged
 
 
 def _chords_for_key(root: str, scale: str, extensions: list[int], rng: random.Random) -> list[str]:

@@ -53,4 +53,4 @@ ncs_music/
 .env.*
 
 
-src/lofi_maker/__pycache__
+**/__pycache__

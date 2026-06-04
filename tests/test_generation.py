@@ -85,6 +85,7 @@ def test_rule_based_chords_overlap_bar_boundaries():
     bar = (60.0 / ctx.bpm) * 4
 
     assert any(note.start < bar < note.end for note in chords.notes)
+    assert _max_note_gap(chords.notes, ctx.duration_seconds) < bar
 
 
 def test_rule_based_sparse_density_can_omit_drums():
@@ -123,20 +124,13 @@ def test_rule_based_notes_have_positive_duration():
             assert note.end > note.start
 
 
-def test_rule_based_chords_do_not_retrigger_overlapping_common_tones():
+def test_rule_based_chords_keep_harmony_present():
     backend = RuleBasedBackend()
     ctx = MusicContext(bpm=80.0, duration_seconds=32.0, seed=42)
     midi = backend.generate_midi(ctx)
     chords = next(i for i in midi.instruments if i.name == "chords")
 
-    notes_by_pitch: dict[int, list[pretty_midi.Note]] = {}
-    for note in chords.notes:
-        notes_by_pitch.setdefault(note.pitch, []).append(note)
-
-    for notes in notes_by_pitch.values():
-        ordered = sorted(notes, key=lambda n: n.start)
-        for left, right in zip(ordered, ordered[1:]):
-            assert left.end <= right.start
+    assert _max_note_gap(chords.notes, ctx.duration_seconds) < 3.0
 
 
 def test_rule_based_preserves_source_melody_notes():
@@ -151,3 +145,32 @@ def test_rule_based_preserves_source_melody_notes():
     melody = next(i for i in midi.instruments if i.name == "melody")
 
     assert [(n.start, n.end, n.pitch) for n in melody.notes] == [(0.5, 1.0, 64), (1.5, 2.0, 67)]
+
+
+def test_rule_based_sparse_piano_has_no_long_harmony_gaps():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(
+        bpm=60.0,
+        duration_seconds=90.0,
+        density=0.0,
+        melody_density=0.0,
+        chord_instrument="felt_piano",
+        seed=42,
+    )
+    midi = backend.generate_midi(ctx)
+    chords = next(i for i in midi.instruments if i.name == "chords")
+
+    assert _max_note_gap(chords.notes, ctx.duration_seconds) < 3.0
+
+
+def _max_note_gap(notes: list[pretty_midi.Note], duration_seconds: float) -> float:
+    if not notes:
+        return duration_seconds
+
+    intervals = sorted((max(0.0, n.start), min(duration_seconds, n.end)) for n in notes)
+    max_gap = max(0.0, intervals[0][0])
+    current_end = intervals[0][1]
+    for start, end in intervals[1:]:
+        max_gap = max(max_gap, start - current_end)
+        current_end = max(current_end, end)
+    return max(max_gap, duration_seconds - current_end)

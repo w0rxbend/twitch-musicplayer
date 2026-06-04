@@ -262,7 +262,7 @@ def remake_lofi(
             f"Cover BPM: {ctx.bpm:.1f}  Energy: {ctx.energy:.2f}"
         )
 
-        click.echo("  Basic Pitch melody transcription...")
+        click.echo("  Melody transcription...")
         notes = extract_melody(melody_path)
         if notes:
             ctx.melody_notes = notes

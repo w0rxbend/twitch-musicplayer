@@ -144,10 +144,11 @@ class RuleBasedBackend:
             next_root, _ = chord_data[next_chord_index]
 
             if b % harmonic_span == 0:
-                span_bars = min(harmonic_span, context.bars - b)
-                chord_notes = _voice_lead(_voicing(root, intervals, base_octave=4), previous_chord_notes)
-                self._chord(chords_inst, chord_notes, t, bar * span_bars, beat)
-                previous_chord_notes = chord_notes
+                previous_chord_notes = _voice_lead(
+                    _voicing(root, intervals, base_octave=4),
+                    previous_chord_notes,
+                )
+            self._chord(chords_inst, previous_chord_notes or _voicing(root, intervals, base_octave=4), t, bar, beat)
 
             add_pickup = next_chord_index != chord_index
             self._bass(
@@ -176,7 +177,6 @@ class RuleBasedBackend:
         if has_source_melody:
             self._source_melody(melody_inst, context.melody_notes or [], context.duration_seconds)
 
-        self._merge_near_repeated_notes(chords_inst, max_gap=beat * 0.08)
         self._merge_near_repeated_notes(melody_inst, max_gap=beat * 0.05)
         midi.instruments.extend([chords_inst, bass_inst, melody_inst, drums_inst])
 
@@ -189,7 +189,7 @@ class RuleBasedBackend:
 
     def _chord(self, inst, notes, t0, bar_dur, beat):
         arpeggiate = random.random() < 0.35
-        dur = bar_dur + beat * random.uniform(0.06, 0.18)
+        dur = bar_dur * random.uniform(0.92, 1.02)
 
         for i, pitch in enumerate(notes):
             onset = _jitter(t0 + (i * 0.030 if arpeggiate else 0.0), 0.006)
@@ -200,15 +200,28 @@ class RuleBasedBackend:
                 end=max(0.0, onset) + dur,
             ))
 
+        # A quiet mid-bar re-articulation keeps piano/Rhodes samples from decaying into silence.
+        if len(notes) >= 3:
+            onset = _jitter(t0 + beat * random.choice([1.75, 2.0, 2.25]), 0.010)
+            color_notes = notes[-2:] if len(notes) >= 4 else notes[-1:]
+            color_dur = min(t0 + bar_dur + beat * 0.05, onset + beat * random.uniform(1.25, 1.9))
+            for pitch in color_notes:
+                inst.notes.append(pretty_midi.Note(
+                    velocity=_vel(27, 4),
+                    pitch=pitch,
+                    start=max(0.0, onset),
+                    end=color_dur,
+                ))
+
         # A soft upper color tone late in the bar helps bridge chord changes.
-        if len(notes) >= 4 and random.random() < 0.55:
-            onset = _jitter(t0 + beat * random.choice([2.5, 3.0]), 0.010)
+        if len(notes) >= 4 and random.random() < 0.45:
+            onset = _jitter(t0 + beat * random.choice([3.0, 3.25]), 0.010)
             pitch = notes[-1]
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(30, 5),
+                velocity=_vel(25, 4),
                 pitch=pitch,
                 start=max(0.0, onset),
-                end=min(t0 + bar_dur + beat * 0.12, max(0.0, onset) + beat * random.uniform(0.8, 1.2)),
+                end=min(t0 + bar_dur + beat * 0.08, max(0.0, onset) + beat * random.uniform(0.6, 1.0)),
             ))
 
     def _bass(self, inst, root, next_root, t0, bar_dur, beat, swing, density, add_pickup):

@@ -22,7 +22,7 @@ def extract_melody(path: str | Path) -> Optional[list[tuple[float, float, int]]]
         ]
         return notes or None
     except ImportError:
-        logger.info("Basic Pitch not available; using librosa pYIN melody fallback")
+        logger.debug("Basic Pitch not available; using librosa pYIN melody fallback")
         return _extract_melody_with_librosa(path)
     except Exception as exc:
         logger.warning("Basic Pitch melody extraction failed: %s; trying librosa fallback", exc)

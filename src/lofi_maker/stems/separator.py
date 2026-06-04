@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import numpy as np
+import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,6 @@ def separate_stems(path: str | Path, model_name: str = "htdemucs") -> Optional[S
     """
     try:
         import torch
-        import torchaudio
         from demucs.pretrained import get_model
         from demucs.apply import apply_model
 
@@ -38,15 +38,15 @@ def separate_stems(path: str | Path, model_name: str = "htdemucs") -> Optional[S
         model.cpu()
         model.eval()
 
-        waveform, sr = torchaudio.load(str(path))
-        if waveform.shape[0] == 1:
-            waveform = waveform.repeat(2, 1)
+        waveform, sr = _load_audio_for_demucs(path)
+        waveform_tensor = torch.from_numpy(waveform)
 
         if sr != model.samplerate:
-            waveform = torchaudio.functional.resample(waveform, sr, model.samplerate)
+            import torchaudio
+            waveform_tensor = torchaudio.functional.resample(waveform_tensor, sr, model.samplerate)
 
         with torch.no_grad():
-            sources = apply_model(model, waveform.unsqueeze(0), device="cpu")[0]
+            sources = apply_model(model, waveform_tensor.unsqueeze(0), device="cpu")[0]
 
         stem_map: dict[str, np.ndarray] = {
             name: sources[i].mean(0).numpy()
@@ -71,3 +71,13 @@ def separate_stems(path: str | Path, model_name: str = "htdemucs") -> Optional[S
     except Exception as exc:
         logger.error("Stem separation failed: %s", exc)
         return None
+
+
+def _load_audio_for_demucs(path: str | Path) -> tuple[np.ndarray, int]:
+    audio, sr = sf.read(str(path), always_2d=True, dtype="float32")
+    if audio.shape[1] == 1:
+        audio = np.repeat(audio, 2, axis=1)
+    elif audio.shape[1] > 2:
+        audio = audio[:, :2]
+
+    return np.ascontiguousarray(audio.T), sr

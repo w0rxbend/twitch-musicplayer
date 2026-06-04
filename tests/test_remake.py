@@ -60,9 +60,37 @@ def test_build_cover_context_keeps_and_slows_source_melody():
     )
     result = build_cover_context(ctx)
 
-    assert result.melody_notes == [(100.0 / 88.0, 1.5 * (100.0 / 88.0), 64)]
+    assert result.melody_notes == [(1.1931818181818181, 1.7045454545454544, 64)]
     assert result.melody_density == 0.0
     assert result.melody_instrument == "felt_piano"
+
+
+def test_build_cover_context_quantizes_and_simplifies_source_melody():
+    from lofi_maker.core.music_context import MusicContext
+    from lofi_maker.core.lofi_arranger import build_cover_context
+
+    ctx = MusicContext(
+        key="C major",
+        bpm=80.0,
+        source_bpm=91.0,
+        duration_seconds=8.0,
+        melody_notes=[
+            (0.03, 0.20, 61),
+            (0.08, 0.50, 62),
+            (0.53, 0.74, 63),
+            (1.01, 1.20, 66),
+        ],
+        energy=0.4,
+        seed=1,
+    )
+    result = build_cover_context(ctx)
+    assert result.melody_notes is not None
+
+    grid = (60.0 / result.bpm) / 4.0
+    for start, end, pitch in result.melody_notes:
+        assert abs((start / grid) - round(start / grid)) < 1e-9
+        assert end > start
+        assert pitch % 12 in {0, 2, 4, 5, 7, 9, 11}
 
 
 def test_cover_effects_from_context_returns_source_driven_effects():

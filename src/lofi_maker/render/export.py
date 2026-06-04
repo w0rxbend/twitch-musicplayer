@@ -66,6 +66,7 @@ def export_audio(
     name = output_stem.name
 
     audio = normalize_lufs(audio, sr, target_lufs)
+    audio = trim_trailing_silence(audio, sr)
     results: dict[str, Path] = {}
 
     need_wav = "wav" in formats or "mp3" in formats
@@ -84,3 +85,34 @@ def export_audio(
             results.pop("wav", None)
 
     return results
+
+
+def trim_trailing_silence(
+    audio: np.ndarray,
+    sr: int,
+    threshold_db: float = -45.0,
+    keep_seconds: float = 0.75,
+    frame_seconds: float = 0.25,
+) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+
+    threshold = 10 ** (threshold_db / 20.0)
+    mono = np.mean(audio, axis=1) if audio.ndim > 1 else audio
+    mono = np.abs(mono)
+    frame_len = max(1, int(sr * frame_seconds))
+    active_end = None
+
+    for start in range(0, len(mono), frame_len):
+        frame = mono[start:start + frame_len]
+        if frame.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(frame * frame)))
+        if rms > threshold:
+            active_end = min(len(mono), start + frame_len)
+
+    if active_end is None:
+        return audio
+
+    end = min(len(mono), active_end + int(sr * keep_seconds))
+    return audio[:end]

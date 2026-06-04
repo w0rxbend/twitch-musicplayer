@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+import math
 from typing import Optional
 
 
@@ -35,4 +36,4 @@ class MusicContext:
     @property
     def bars(self) -> int:
         beats = (self.bpm / 60.0) * self.duration_seconds
-        return max(4, int(beats / 4))
+        return max(4, math.ceil(beats / 4))

@@ -55,6 +55,7 @@ def apply_lofi_effects(audio: np.ndarray, sr: int, config: EffectsConfig) -> np.
     if config.tape_wow > 0:
         audio = _tape_wow(audio, sr, config.tape_wow)
 
+    audio = _trim_trailing_silence(audio, sr)
     return _fade_edges(audio, sr)
 
 
@@ -79,6 +80,25 @@ def _pad_tail(audio: np.ndarray, sr: int, seconds: float) -> np.ndarray:
     else:
         tail = np.zeros((tail_len, audio.shape[1]), dtype=audio.dtype)
     return np.concatenate([audio, tail], axis=0)
+
+
+def _trim_trailing_silence(
+    audio: np.ndarray,
+    sr: int,
+    threshold: float = 1e-4,
+    keep_seconds: float = 0.75,
+) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+
+    levels = np.max(np.abs(audio), axis=1) if audio.ndim > 1 else np.abs(audio)
+    active = np.flatnonzero(levels > threshold)
+    if active.size == 0:
+        return audio
+
+    keep = int(sr * keep_seconds)
+    end = min(len(levels), int(active[-1]) + keep)
+    return audio[:end]
 
 
 def _tape_wow(audio: np.ndarray, sr: int, amount: float) -> np.ndarray:
