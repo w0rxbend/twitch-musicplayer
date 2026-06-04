@@ -1,0 +1,21 @@
+name: ocean_floor
+style: lofi
+bpm_range: [54, 66]
+scale_bias: minor
+swing: 0.50
+drum_density: 0.06
+melody_density: 0.08
+chord_extensions: [9, 11]
+mood: "submerged, dark, weightless"
+instruments:
+  chords: pad
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.03
+  tape_wow: 0.06
+  lowpass_hz: 5600
+  reverb: 0.66
+  compression: gentle
+  saturation: 0.02

@@ -1,0 +1,21 @@
+name: cassette_clouds
+style: lofi
+bpm_range: [66, 80]
+scale_bias: major
+swing: 0.53
+drum_density: 0.26
+melody_density: 0.18
+chord_extensions: [7, 9]
+mood: "soft, hazy, nostalgic"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.11
+  tape_wow: 0.11
+  lowpass_hz: 7600
+  reverb: 0.34
+  compression: gentle
+  saturation: 0.07

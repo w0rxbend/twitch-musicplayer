@@ -1,0 +1,21 @@
+name: chillhop_cafe
+style: lofi
+bpm_range: [82, 96]
+scale_bias: minor
+swing: 0.60
+drum_density: 0.50
+melody_density: 0.24
+chord_extensions: [7, 9]
+mood: "relaxed, cafe, head-nod"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.14
+  tape_wow: 0.05
+  lowpass_hz: 9000
+  reverb: 0.24
+  compression: medium
+  saturation: 0.10

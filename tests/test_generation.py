@@ -67,3 +67,24 @@ def test_instrument_count():
     ctx = MusicContext(bpm=80.0, duration_seconds=8.0, seed=42)
     midi = backend.generate_midi(ctx)
     assert len(midi.instruments) == 4  # chords, bass, melody, drums
+
+
+def test_rule_based_chords_overlap_bar_boundaries():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(bpm=80.0, duration_seconds=16.0, seed=42)
+    midi = backend.generate_midi(ctx)
+    chords = next(i for i in midi.instruments if i.name == "chords")
+    bar = (60.0 / ctx.bpm) * 4
+
+    assert any(note.start < bar < note.end for note in chords.notes)
+    assert any(cc.number == 64 and cc.value > 0 for cc in chords.control_changes)
+
+
+def test_rule_based_notes_have_positive_duration():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(bpm=80.0, duration_seconds=16.0, seed=123)
+    midi = backend.generate_midi(ctx)
+
+    for instrument in midi.instruments:
+        for note in instrument.notes:
+            assert note.end > note.start

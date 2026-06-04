@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import sys
+import time
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -207,6 +208,116 @@ def serve(host: str, port: int) -> None:
     import uvicorn
     from .api import app
     uvicorn.run(app, host=host, port=port)
+
+
+# ------------------------------------------------------------------ #
+# songgen download-ncs-music
+# ------------------------------------------------------------------ #
+
+@cli.command("download-ncs-music")
+@click.argument("source", required=False, default="")
+@click.option("--genre", default="", help="NCS genre id, e.g. 12")
+@click.option("--mood", default="", help="NCS mood id, e.g. 20")
+@click.option("--version", default=None, type=click.Choice(["regular", "instrumental"]))
+@click.option("--limit", default=20, show_default=True, help="Maximum tracks to download")
+@click.option("--pages", default=3, show_default=True, help="Search pages to inspect")
+@click.option("--delay", default=1.5, show_default=True, help="Delay between requests in seconds")
+@click.option("--out-dir", "out_dir", type=click.Path(), default="ncs_music", show_default=True)
+@click.option("--dry-run", is_flag=True, default=False, help="List tracks without downloading")
+def download_ncs_music(
+    source: str,
+    genre: str,
+    mood: str,
+    version: Optional[str],
+    limit: int,
+    pages: int,
+    delay: float,
+    out_dir: str,
+    dry_run: bool,
+) -> None:
+    """Download a bounded set of NCS music search results."""
+    from .sources.ncs_music import (
+        NcsDownloadError,
+        append_manifest,
+        download_file,
+        fetch_search_results,
+        read_manifest_ids,
+        safe_output_name,
+        trim_limit,
+    )
+
+    try:
+        limit = trim_limit(limit)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if pages < 1:
+        click.echo("Error: pages must be at least 1", err=True)
+        sys.exit(1)
+    if delay < 0:
+        click.echo("Error: delay cannot be negative", err=True)
+        sys.exit(1)
+
+    output_path = Path(out_dir)
+    manifest_path = output_path / "ncs_music_manifest.jsonl"
+    seen_manifest_ids = read_manifest_ids(manifest_path)
+
+    label = source or "NCS music search"
+    click.echo(f"Searching NCS for '{label}' (limit={limit}, pages={pages}, delay={delay:g}s)")
+
+    try:
+        tracks = fetch_search_results(
+            source,
+            pages=pages,
+            delay=delay,
+            genre=genre,
+            mood=mood,
+            version=version or "",
+        )
+    except NcsDownloadError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if not tracks:
+        click.echo("No NCS music results found.")
+        return
+
+    downloaded = 0
+    inspected = 0
+    for track in tracks:
+        if inspected >= limit:
+            break
+        inspected += 1
+
+        file_path = output_path / safe_output_name(track)
+        click.echo(f"  {inspected:>3}. {track.title} — {track.artist}")
+
+        if dry_run:
+            click.echo(f"       {track.page_url}")
+            continue
+
+        if file_path.exists() and file_path.stat().st_size > 0:
+            click.echo(f"       exists: {file_path}")
+        else:
+            try:
+                bytes_written = download_file(track.download_url, file_path)
+            except NcsDownloadError as exc:
+                click.echo(f"       failed: {exc}", err=True)
+                continue
+            downloaded += 1
+            click.echo(f"       saved: {file_path} ({bytes_written / 1024 / 1024:.1f} MB)")
+
+        if track.id not in seen_manifest_ids:
+            append_manifest(manifest_path, track, file_path)
+            seen_manifest_ids.add(track.id)
+
+        time.sleep(delay)
+
+    if dry_run:
+        click.echo(f"Found {inspected} track(s).")
+    else:
+        click.echo(f"Downloaded {downloaded} new track(s). Manifest: {manifest_path}")
 
 
 # ------------------------------------------------------------------ #

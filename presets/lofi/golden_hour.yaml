@@ -1,0 +1,21 @@
+name: golden_hour
+style: lofi
+bpm_range: [74, 88]
+scale_bias: major
+swing: 0.57
+drum_density: 0.36
+melody_density: 0.22
+chord_extensions: [7, 9]
+mood: "sunset, mellow, hopeful"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.10
+  tape_wow: 0.06
+  lowpass_hz: 8400
+  reverb: 0.30
+  compression: gentle
+  saturation: 0.08

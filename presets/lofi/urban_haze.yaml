@@ -1,0 +1,21 @@
+name: urban_haze
+style: lofi
+bpm_range: [78, 92]
+scale_bias: minor
+swing: 0.58
+drum_density: 0.44
+melody_density: 0.22
+chord_extensions: [7, 9]
+mood: "city lights, smoked-out, smooth"
+instruments:
+  chords: rhodes
+  melody: muted_trumpet
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.17
+  tape_wow: 0.06
+  lowpass_hz: 8600
+  reverb: 0.26
+  compression: medium
+  saturation: 0.09

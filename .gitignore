@@ -40,6 +40,7 @@ Thumbs.db
 # Generated audio output — don't commit renders
 output/
 mp3/
+ncs_music/
 *.wav
 *.mp3
 *.mid
@@ -53,4 +54,3 @@ mp3/
 
 
 src/lofi_maker/__pycache__
-

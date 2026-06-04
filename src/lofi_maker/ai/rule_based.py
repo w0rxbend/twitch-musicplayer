@@ -73,6 +73,11 @@ def _vel(base: int, spread: int = 12) -> int:
     return max(1, min(127, base + random.randint(-spread, spread)))
 
 
+def _nearest_pitch(pitch: int, target: int) -> int:
+    candidates = [pitch - 12, pitch, pitch + 12]
+    return min(candidates, key=lambda candidate: abs(candidate - target))
+
+
 class RuleBasedBackend:
     @property
     def name(self) -> str:
@@ -104,12 +109,15 @@ class RuleBasedBackend:
         for b in range(context.bars):
             t = b * bar
             root, intervals = chord_data[b % cycle]
-            self._chord(chords_inst, root, intervals, t, bar)
-            self._bass(bass_inst, root, t, bar, beat, context.swing)
+            next_root, _ = chord_data[(b + 1) % cycle]
+            self._chord(chords_inst, root, intervals, t, bar, beat)
+            self._bass(bass_inst, root, next_root, t, bar, beat, context.swing)
             if random.random() < context.melody_density:
                 self._melody_motif(melody_inst, root, scale, t, bar, beat)
             self._drums(drums_inst, t, beat, bar, context.swing, context.density)
 
+        self._add_sustain(chords_inst, context.bars * bar)
+        self._add_sustain(melody_inst, context.bars * bar, value=72)
         midi.instruments.extend([chords_inst, bass_inst, melody_inst, drums_inst])
 
         if context.seed is not None:
@@ -119,41 +127,62 @@ class RuleBasedBackend:
 
     # ------------------------------------------------------------------ #
 
-    def _chord(self, inst, root, intervals, t0, bar_dur):
+    def _chord(self, inst, root, intervals, t0, bar_dur, beat):
         notes = _voicing(root, intervals, base_octave=4)
-        arpeggiate = random.random() < 0.25
+        arpeggiate = random.random() < 0.45
+        dur = bar_dur * random.uniform(1.02, 1.14)
 
         for i, pitch in enumerate(notes):
-            onset = _jitter(t0 + (i * 0.035 if arpeggiate else 0.0), 0.010)
-            dur = bar_dur * random.uniform(0.72, 0.92)
+            onset = _jitter(t0 + (i * 0.045 if arpeggiate else 0.0), 0.008)
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(54, 10),
+                velocity=_vel(48, 8),
                 pitch=pitch,
                 start=max(0.0, onset),
-                end=onset + dur,
+                end=max(0.0, onset) + dur,
             ))
 
-    def _bass(self, inst, root, t0, bar_dur, beat, swing):
+        # A soft upper color tone late in the bar helps bridge chord changes.
+        if len(notes) >= 4 and random.random() < 0.55:
+            onset = _jitter(t0 + beat * random.choice([2.5, 3.0]), 0.010)
+            pitch = notes[-1]
+            inst.notes.append(pretty_midi.Note(
+                velocity=_vel(34, 6),
+                pitch=pitch,
+                start=max(0.0, onset),
+                end=max(0.0, onset) + beat * random.uniform(1.0, 1.7),
+            ))
+
+    def _bass(self, inst, root, next_root, t0, bar_dur, beat, swing):
         root_midi = root + 36  # 2 octaves below middle C
         fifth_midi = root + 43
+        next_root_midi = _nearest_pitch(next_root + 36, root_midi)
 
         swing_push = (swing - 0.5) * beat if swing > 0.5 else 0.0
 
         # Root on beat 1
         inst.notes.append(pretty_midi.Note(
-            velocity=_vel(68, 8),
+            velocity=_vel(62, 7),
             pitch=root_midi,
             start=_jitter(t0, 0.008),
-            end=t0 + beat * 1.85,
+            end=t0 + beat * random.uniform(2.05, 2.45),
         ))
         # Syncopated off-beat ghost note
         if random.random() < 0.55:
             t2 = t0 + beat * 2.0 + swing_push
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(52, 8),
+                velocity=_vel(46, 7),
                 pitch=fifth_midi if random.random() < 0.3 else root_midi,
                 start=_jitter(t2, 0.010),
-                end=t2 + beat * 0.85,
+                end=t2 + beat * 1.05,
+            ))
+
+        if random.random() < 0.72:
+            pickup = t0 + beat * random.choice([3.0, 3.5]) + swing_push * 0.5
+            inst.notes.append(pretty_midi.Note(
+                velocity=_vel(42, 6),
+                pitch=next_root_midi,
+                start=_jitter(pickup, 0.010),
+                end=t0 + bar_dur + beat * 0.20,
             ))
 
     def _melody_motif(self, inst, root, scale, t0, bar_dur, beat):
@@ -169,19 +198,21 @@ class RuleBasedBackend:
         if not candidates:
             return
 
-        n_notes = random.randint(1, 3)
-        beats_available = [0, 1, 2, 3]
-        chosen_beats = sorted(random.sample(beats_available, min(n_notes, 4)))
+        n_notes = random.randint(2, 4)
+        start_step = random.choice([0, 1, 2])
+        spacing = random.choice([0.5, 1.0])
+        chosen_offsets = [start_step * 0.5 + i * spacing for i in range(n_notes)]
+        chosen_offsets = [offset for offset in chosen_offsets if offset < 3.75]
 
         prev = candidates[len(candidates) // 2]
-        for beat_idx in chosen_beats:
+        for offset in chosen_offsets:
             # Stepwise motion bias — feels more musical
-            nearby = [c for c in candidates if abs(c - prev) <= 5] or candidates
+            nearby = [c for c in candidates if abs(c - prev) <= 4] or candidates
             pitch = random.choice(nearby)
-            onset = _jitter(t0 + beat_idx * beat, 0.018)
-            dur = beat * random.uniform(0.45, 1.15)
+            onset = _jitter(t0 + offset * beat, 0.014)
+            dur = beat * random.uniform(0.72, 1.35)
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(48, 14),
+                velocity=_vel(42, 10),
                 pitch=pitch,
                 start=max(0.0, onset),
                 end=onset + dur,
@@ -197,21 +228,27 @@ class RuleBasedBackend:
         swing_push = (swing - 0.5) * beat if swing > 0.5 else 0.0
 
         # Kick: always beat 1, probabilistic beat 3
-        inst.notes.append(pretty_midi.Note(_vel(72, 8), KICK, _jitter(t0, 0.006), t0 + 0.10))
+        inst.notes.append(pretty_midi.Note(_vel(66, 7), KICK, _jitter(t0, 0.006), t0 + 0.12))
         if random.random() < 0.45 * density:
             t3 = t0 + beat * 2.5
-            inst.notes.append(pretty_midi.Note(_vel(62, 10), KICK, _jitter(t3, 0.010), t3 + 0.09))
+            inst.notes.append(pretty_midi.Note(_vel(56, 9), KICK, _jitter(t3, 0.010), t3 + 0.11))
 
         # Snare: beat 3
         t_snare = t0 + beat * 2
-        inst.notes.append(pretty_midi.Note(_vel(64, 10), SNARE, _jitter(t_snare, 0.010), t_snare + 0.12))
+        inst.notes.append(pretty_midi.Note(_vel(58, 8), SNARE, _jitter(t_snare, 0.010), t_snare + 0.16))
 
         # Hi-hats: 8th notes with swing on the off-beats
         for eighth in range(8):
             t_hat = t0 + eighth * (beat / 2.0)
             if eighth % 2 == 1:
                 t_hat += swing_push
-            if random.random() > 0.12:  # occasional drop for groove
-                hat = HIHAT_O if eighth % 4 == 2 and random.random() < 0.25 else HIHAT_C
-                vel = _vel(42 if eighth % 2 == 0 else 32, 10)
-                inst.notes.append(pretty_midi.Note(vel, hat, _jitter(t_hat, 0.006), t_hat + 0.05))
+            if random.random() > 0.20:  # occasional drop for groove
+                hat = HIHAT_O if eighth % 4 == 2 and random.random() < 0.18 else HIHAT_C
+                vel = _vel(34 if eighth % 2 == 0 else 27, 7)
+                inst.notes.append(pretty_midi.Note(vel, hat, _jitter(t_hat, 0.006), t_hat + 0.075))
+
+    def _add_sustain(self, inst, duration, value=86):
+        if duration <= 0:
+            return
+        inst.control_changes.append(pretty_midi.ControlChange(64, value, 0.0))
+        inst.control_changes.append(pretty_midi.ControlChange(64, 0, duration + 0.5))

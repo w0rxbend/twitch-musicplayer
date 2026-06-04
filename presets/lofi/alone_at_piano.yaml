@@ -1,0 +1,21 @@
+name: alone_at_piano
+style: lofi
+bpm_range: [58, 72]
+scale_bias: minor
+swing: 0.50
+drum_density: 0.00
+melody_density: 0.20
+chord_extensions: [7, 9]
+mood: "solitary, intimate, quiet"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.04
+  tape_wow: 0.03
+  lowpass_hz: 7600
+  reverb: 0.52
+  compression: gentle
+  saturation: 0.02

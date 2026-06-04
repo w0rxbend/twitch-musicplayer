@@ -3,8 +3,8 @@ style: lofi
 bpm_range: [78, 95]
 scale_bias: minor
 swing: 0.52
-drum_density: 0.60
-melody_density: 0.28
+drum_density: 0.48
+melody_density: 0.22
 chord_extensions: [7, 9]
 mood: "gritty, dusty, hip-hop"
 instruments:
@@ -13,9 +13,9 @@ instruments:
   bass: synth_bass
   drums: 808_kit
 effects:
-  vinyl_noise: 0.25
-  tape_wow: 0.10
-  lowpass_hz: 10000
-  reverb: 0.15
-  compression: hard
-  saturation: 0.18
+  vinyl_noise: 0.18
+  tape_wow: 0.08
+  lowpass_hz: 9200
+  reverb: 0.22
+  compression: medium
+  saturation: 0.12

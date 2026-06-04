@@ -1,0 +1,21 @@
+name: felt_piano_morning
+style: lofi
+bpm_range: [66, 80]
+scale_bias: major
+swing: 0.52
+drum_density: 0.08
+melody_density: 0.22
+chord_extensions: [7, 9]
+mood: "gentle, morning, hopeful"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.05
+  tape_wow: 0.04
+  lowpass_hz: 7800
+  reverb: 0.42
+  compression: gentle
+  saturation: 0.02

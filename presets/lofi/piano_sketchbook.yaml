@@ -1,0 +1,21 @@
+name: piano_sketchbook
+style: lofi
+bpm_range: [70, 84]
+scale_bias: major
+swing: 0.54
+drum_density: 0.12
+melody_density: 0.28
+chord_extensions: [7, 9]
+mood: "simple, melodic, handwritten"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: brush_kit
+effects:
+  vinyl_noise: 0.06
+  tape_wow: 0.05
+  lowpass_hz: 8000
+  reverb: 0.36
+  compression: gentle
+  saturation: 0.03

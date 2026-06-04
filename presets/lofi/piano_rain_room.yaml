@@ -1,0 +1,21 @@
+name: piano_rain_room
+style: lofi
+bpm_range: [62, 76]
+scale_bias: minor
+swing: 0.53
+drum_density: 0.10
+melody_density: 0.20
+chord_extensions: [7, 9]
+mood: "rainy, close, contemplative"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.09
+  tape_wow: 0.04
+  lowpass_hz: 7200
+  reverb: 0.48
+  compression: gentle
+  saturation: 0.02

@@ -3,8 +3,8 @@ style: lofi
 bpm_range: [74, 88]
 scale_bias: major
 swing: 0.55
-drum_density: 0.48
-melody_density: 0.28
+drum_density: 0.38
+melody_density: 0.22
 chord_extensions: [7, 9]
 mood: "warm, vintage, nostalgic"
 instruments:
@@ -13,9 +13,9 @@ instruments:
   bass: upright_bass
   drums: brush_kit
 effects:
-  vinyl_noise: 0.16
-  tape_wow: 0.12
-  lowpass_hz: 9000
-  reverb: 0.20
+  vinyl_noise: 0.12
+  tape_wow: 0.10
+  lowpass_hz: 8400
+  reverb: 0.30
   compression: medium
-  saturation: 0.15
+  saturation: 0.10

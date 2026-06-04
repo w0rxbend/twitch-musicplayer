@@ -3,8 +3,8 @@ style: lofi
 bpm_range: [72, 85]
 scale_bias: minor
 swing: 0.54
-drum_density: 0.40
-melody_density: 0.20
+drum_density: 0.32
+melody_density: 0.18
 chord_extensions: [7, 9]
 mood: "focused, calm, late night"
 instruments:
@@ -13,9 +13,9 @@ instruments:
   bass: muted_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.12
+  vinyl_noise: 0.10
   tape_wow: 0.04
-  lowpass_hz: 7800
-  reverb: 0.25
+  lowpass_hz: 7400
+  reverb: 0.32
   compression: gentle
-  saturation: 0.05
+  saturation: 0.04

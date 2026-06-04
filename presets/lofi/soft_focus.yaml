@@ -1,0 +1,21 @@
+name: soft_focus
+style: lofi
+bpm_range: [64, 78]
+scale_bias: major
+swing: 0.54
+drum_density: 0.20
+melody_density: 0.16
+chord_extensions: [7, 9]
+mood: "blurred, tender, quiet"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: brush_kit
+effects:
+  vinyl_noise: 0.08
+  tape_wow: 0.05
+  lowpass_hz: 7000
+  reverb: 0.44
+  compression: gentle
+  saturation: 0.03

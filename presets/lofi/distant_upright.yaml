@@ -1,0 +1,21 @@
+name: distant_upright
+style: lofi
+bpm_range: [54, 68]
+scale_bias: major
+swing: 0.50
+drum_density: 0.00
+melody_density: 0.14
+chord_extensions: [7, 9, 11]
+mood: "distant, roomy, reflective"
+instruments:
+  chords: felt_piano
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.03
+  tape_wow: 0.04
+  lowpass_hz: 6800
+  reverb: 0.68
+  compression: gentle
+  saturation: 0.01

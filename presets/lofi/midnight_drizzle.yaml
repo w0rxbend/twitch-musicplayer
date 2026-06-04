@@ -1,0 +1,21 @@
+name: midnight_drizzle
+style: lofi
+bpm_range: [68, 82]
+scale_bias: minor
+swing: 0.59
+drum_density: 0.32
+melody_density: 0.16
+chord_extensions: [7, 9, 11]
+mood: "nocturnal, wet pavement, calm"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.15
+  tape_wow: 0.07
+  lowpass_hz: 7800
+  reverb: 0.38
+  compression: gentle
+  saturation: 0.05
