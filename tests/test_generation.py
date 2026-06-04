@@ -62,6 +62,14 @@ def test_from_preset_respects_bpm_range():
         assert p.bpm_range[0] <= ctx.bpm <= p.bpm_range[1]
 
 
+def test_from_preset_sets_instrument_choices():
+    p = load_preset("sleepy_piano")
+    ctx = from_preset(p, duration_seconds=10.0, seed=1)
+
+    assert ctx.chord_instrument == "felt_piano"
+    assert ctx.melody_instrument == "felt_piano"
+
+
 def test_instrument_count():
     backend = RuleBasedBackend()
     ctx = MusicContext(bpm=80.0, duration_seconds=8.0, seed=42)
@@ -77,7 +85,32 @@ def test_rule_based_chords_overlap_bar_boundaries():
     bar = (60.0 / ctx.bpm) * 4
 
     assert any(note.start < bar < note.end for note in chords.notes)
-    assert any(cc.number == 64 and cc.value > 0 for cc in chords.control_changes)
+
+
+def test_rule_based_sparse_density_can_omit_drums():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(bpm=70.0, duration_seconds=16.0, density=0.0, seed=42)
+    midi = backend.generate_midi(ctx)
+    drums = next(i for i in midi.instruments if i.name == "drums")
+
+    assert len(drums.notes) == 0
+
+
+def test_rule_based_uses_context_instruments():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(
+        bpm=70.0,
+        duration_seconds=16.0,
+        chord_instrument="felt_piano",
+        melody_instrument="muted_trumpet",
+        bass_instrument="upright_bass",
+        seed=42,
+    )
+    midi = backend.generate_midi(ctx)
+
+    assert next(i for i in midi.instruments if i.name == "chords").program == 0
+    assert next(i for i in midi.instruments if i.name == "melody").program == 59
+    assert next(i for i in midi.instruments if i.name == "bass").program == 32
 
 
 def test_rule_based_notes_have_positive_duration():
@@ -88,3 +121,33 @@ def test_rule_based_notes_have_positive_duration():
     for instrument in midi.instruments:
         for note in instrument.notes:
             assert note.end > note.start
+
+
+def test_rule_based_chords_do_not_retrigger_overlapping_common_tones():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(bpm=80.0, duration_seconds=32.0, seed=42)
+    midi = backend.generate_midi(ctx)
+    chords = next(i for i in midi.instruments if i.name == "chords")
+
+    notes_by_pitch: dict[int, list[pretty_midi.Note]] = {}
+    for note in chords.notes:
+        notes_by_pitch.setdefault(note.pitch, []).append(note)
+
+    for notes in notes_by_pitch.values():
+        ordered = sorted(notes, key=lambda n: n.start)
+        for left, right in zip(ordered, ordered[1:]):
+            assert left.end <= right.start
+
+
+def test_rule_based_preserves_source_melody_notes():
+    backend = RuleBasedBackend()
+    ctx = MusicContext(
+        bpm=80.0,
+        duration_seconds=8.0,
+        melody_notes=[(0.5, 1.0, 64), (1.5, 2.0, 67)],
+        seed=42,
+    )
+    midi = backend.generate_midi(ctx)
+    melody = next(i for i in midi.instruments if i.name == "melody")
+
+    assert [(n.start, n.end, n.pitch) for n in melody.notes] == [(0.5, 1.0, 64), (1.5, 2.0, 67)]

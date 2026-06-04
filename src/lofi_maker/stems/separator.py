@@ -25,7 +25,7 @@ class StemBundle:
 def separate_stems(path: str | Path, model_name: str = "htdemucs") -> Optional[StemBundle]:
     """
     CPU stem separation via Demucs. Expect 5-20 min for a typical 3-4 min song.
-    Requires: pip install lofi-maker[stems]
+    Requires optional stems dependencies.
     """
     try:
         import torch
@@ -63,7 +63,10 @@ def separate_stems(path: str | Path, model_name: str = "htdemucs") -> Optional[S
         )
 
     except ImportError:
-        logger.warning("Demucs not available. Install with: pip install lofi-maker[stems]")
+        logger.warning(
+            "Demucs not available. Install optional deps with: "
+            "pipx run uv sync --extra stems --extra melody"
+        )
         return None
     except Exception as exc:
         logger.error("Stem separation failed: %s", exc)

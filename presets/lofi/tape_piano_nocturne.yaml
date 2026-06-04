@@ -2,10 +2,10 @@ name: tape_piano_nocturne
 style: lofi
 bpm_range: [56, 70]
 scale_bias: minor
-swing: 0.52
+swing: 0.50
 drum_density: 0.00
-melody_density: 0.16
-chord_extensions: [7, 9]
+melody_density: 0.11
+chord_extensions: [9, 11]
 mood: "nocturne, tape-worn, fragile"
 instruments:
   chords: felt_piano
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.07
-  tape_wow: 0.10
-  lowpass_hz: 6500
-  reverb: 0.58
+  tape_wow: 0.07
+  lowpass_hz: 6200
+  reverb: 0.68
   compression: gentle
-  saturation: 0.03
+  saturation: 0.02

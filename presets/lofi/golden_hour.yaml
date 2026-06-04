@@ -3,9 +3,9 @@ style: lofi
 bpm_range: [74, 88]
 scale_bias: major
 swing: 0.57
-drum_density: 0.36
-melody_density: 0.22
-chord_extensions: [7, 9]
+drum_density: 0.28
+melody_density: 0.16
+chord_extensions: [7, 9, 11]
 mood: "sunset, mellow, hopeful"
 instruments:
   chords: rhodes
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.10
-  tape_wow: 0.06
-  lowpass_hz: 8400
-  reverb: 0.30
+  tape_wow: 0.05
+  lowpass_hz: 8000
+  reverb: 0.36
   compression: gentle
-  saturation: 0.08
+  saturation: 0.06

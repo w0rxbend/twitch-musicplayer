@@ -1,11 +1,11 @@
 name: dusty_808
 style: lofi
-bpm_range: [78, 95]
+bpm_range: [76, 90]
 scale_bias: minor
 swing: 0.52
-drum_density: 0.48
-melody_density: 0.22
-chord_extensions: [7, 9]
+drum_density: 0.34
+melody_density: 0.14
+chord_extensions: [7, 9, 11]
 mood: "gritty, dusty, hip-hop"
 instruments:
   chords: rhodes
@@ -13,9 +13,9 @@ instruments:
   bass: synth_bass
   drums: 808_kit
 effects:
-  vinyl_noise: 0.18
-  tape_wow: 0.08
-  lowpass_hz: 9200
-  reverb: 0.22
-  compression: medium
-  saturation: 0.12
+  vinyl_noise: 0.13
+  tape_wow: 0.05
+  lowpass_hz: 8200
+  reverb: 0.30
+  compression: gentle
+  saturation: 0.08

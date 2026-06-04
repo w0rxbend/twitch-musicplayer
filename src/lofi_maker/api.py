@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from .analysis.melody_extractor import extract_melody
 from .analysis.song_analyzer import analyze_song
-from .core.lofi_arranger import apply_preset_to_context, from_preset
+from .core.lofi_arranger import build_cover_context, cover_effects_from_context, from_preset
 from .presets.loader import list_presets, load_preset
 from .render.effects import apply_lofi_effects
 from .render.export import export_audio
@@ -73,19 +73,12 @@ async def generate_preset(req: GeneratePresetRequest):
 @app.post("/remake/lofi")
 async def remake_lofi(
     file: UploadFile = File(...),
-    preset: str = Query("rainy_window"),
-    preserve_melody: bool = Query(False),
     duration_seconds: float = Query(90.0),
     seed: Optional[int] = Query(None),
     output: str = Query("mp3"),
     use_transformer: bool = Query(False),
     model_id: Optional[str] = Query(None),
 ):
-    try:
-        preset_obj = load_preset(preset)
-    except FileNotFoundError:
-        raise HTTPException(404, f"Preset '{preset}' not found")
-
     with tempfile.TemporaryDirectory() as tmpdir:
         filename = file.filename or "upload.mp3"
         input_path = Path(tmpdir) / filename
@@ -93,17 +86,17 @@ async def remake_lofi(
 
         ctx = analyze_song(input_path, duration_seconds=duration_seconds, seed=seed)
 
-        if preserve_melody:
-            notes = extract_melody(input_path)
-            if notes:
-                ctx.melody_notes = notes
+        notes = extract_melody(input_path)
+        if notes:
+            ctx.melody_notes = notes
 
-        ctx = apply_preset_to_context(ctx, preset_obj)
+        ctx = build_cover_context(ctx)
+        effects_cfg = cover_effects_from_context(ctx)
         backend = _get_backend(use_transformer, model_id)
         midi = backend.generate_midi(ctx)
 
         formats = [f.strip() for f in output.split(",")]
-        return _render_and_respond(midi, preset_obj.effects, "lofi_remake", formats)
+        return _render_and_respond(midi, effects_cfg, "lofi_remake", formats)
 
 
 # ------------------------------------------------------------------ #

@@ -22,7 +22,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-out_dir="output/all_presets"
+out_dir="output/all_presets_$(date +%Y%m%d_%H%M%S)"
 if [[ $# -gt 0 && "${1:-}" != "--" ]]; then
   out_dir=$1
   shift

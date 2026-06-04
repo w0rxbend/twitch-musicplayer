@@ -3,8 +3,8 @@ style: lofi
 bpm_range: [60, 75]
 scale_bias: minor
 swing: 0.50
-drum_density: 0.18
-melody_density: 0.12
+drum_density: 0.10
+melody_density: 0.08
 chord_extensions: [7, 9, 11]
 mood: "dreamy, atmospheric, floating"
 instruments:
@@ -13,9 +13,9 @@ instruments:
   bass: muted_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.08
-  tape_wow: 0.06
-  lowpass_hz: 6800
-  reverb: 0.48
+  vinyl_noise: 0.06
+  tape_wow: 0.04
+  lowpass_hz: 6400
+  reverb: 0.56
   compression: gentle
-  saturation: 0.03
+  saturation: 0.02

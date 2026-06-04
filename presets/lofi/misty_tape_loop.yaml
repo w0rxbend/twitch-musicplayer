@@ -1,12 +1,12 @@
-name: chillhop_cafe
+name: misty_tape_loop
 style: lofi
-bpm_range: [78, 92]
+bpm_range: [66, 80]
 scale_bias: minor
-swing: 0.56
-drum_density: 0.36
-melody_density: 0.18
+swing: 0.52
+drum_density: 0.14
+melody_density: 0.08
 chord_extensions: [7, 9, 11]
-mood: "relaxed, cafe, head-nod"
+mood: "misty, tape-soft, looping"
 instruments:
   chords: rhodes
   melody: felt_piano
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.10
-  tape_wow: 0.04
-  lowpass_hz: 8200
-  reverb: 0.30
+  tape_wow: 0.06
+  lowpass_hz: 6800
+  reverb: 0.50
   compression: gentle
-  saturation: 0.07
+  saturation: 0.04

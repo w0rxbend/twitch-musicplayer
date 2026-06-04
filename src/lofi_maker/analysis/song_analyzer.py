@@ -33,10 +33,10 @@ def analyze_song(
     y, sr = librosa.load(str(path), duration=60.0, mono=True)
 
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    bpm = float(np.median(tempo)) if hasattr(tempo, "__len__") else float(tempo)
-    bpm = max(60.0, min(140.0, bpm))
+    source_bpm = float(np.median(tempo)) if hasattr(tempo, "__len__") else float(tempo)
+    source_bpm = max(60.0, min(160.0, source_bpm))
     # Lofi typically runs a few BPM slower — subtle humanisation
-    bpm = round(bpm * 0.88, 1)
+    bpm = round(max(60.0, min(140.0, source_bpm * 0.88)), 1)
 
     root, mode = detect_key(y, sr)
     key = f"{root} {'minor' if mode == 'minor' else 'major'}"
@@ -55,6 +55,7 @@ def analyze_song(
         swing=0.55,
         seed=seed,
         source_file=str(path),
+        source_bpm=round(source_bpm, 1),
         energy=energy,
     )
 

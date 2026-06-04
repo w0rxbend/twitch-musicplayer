@@ -78,6 +78,22 @@ def _nearest_pitch(pitch: int, target: int) -> int:
     return min(candidates, key=lambda candidate: abs(candidate - target))
 
 
+def _voice_lead(notes: list[int], previous: list[int] | None) -> list[int]:
+    if not previous:
+        return notes
+
+    led: list[int] = []
+    for i, pitch in enumerate(notes):
+        target = previous[min(i, len(previous) - 1)]
+        candidates = [
+            pitch + 12 * shift
+            for shift in range(-2, 3)
+            if 40 <= pitch + 12 * shift <= 90
+        ]
+        led.append(min(candidates or [pitch], key=lambda candidate: abs(candidate - target)))
+    return sorted(led)
+
+
 class RuleBasedBackend:
     @property
     def name(self) -> str:
@@ -99,25 +115,69 @@ class RuleBasedBackend:
         chord_data = [_parse_chord(c) for c in context.chords]
         cycle = len(chord_data)
 
-        chords_inst = pretty_midi.Instrument(program=_PROGRAMS["rhodes"], name="chords")
-        bass_inst   = pretty_midi.Instrument(program=_PROGRAMS["muted_bass"], name="bass")
-        melody_inst = pretty_midi.Instrument(program=_PROGRAMS["felt_piano"], name="melody")
+        chords_inst = pretty_midi.Instrument(
+            program=_PROGRAMS.get(context.chord_instrument, _PROGRAMS["rhodes"]),
+            name="chords",
+        )
+        bass_inst = pretty_midi.Instrument(
+            program=_PROGRAMS.get(context.bass_instrument, _PROGRAMS["muted_bass"]),
+            name="bass",
+        )
+        melody_inst = pretty_midi.Instrument(
+            program=_PROGRAMS.get(context.melody_instrument, _PROGRAMS["felt_piano"]),
+            name="melody",
+        )
         drums_inst  = pretty_midi.Instrument(program=0, is_drum=True, name="drums")
 
         scale = _MINOR_SCALE if context.is_minor else _MAJOR_SCALE
 
+        previous_chord_notes: list[int] | None = None
+        previous_melody_pitch: int | None = None
+        harmonic_span = 2
+        has_source_melody = bool(context.melody_notes)
+
         for b in range(context.bars):
             t = b * bar
-            root, intervals = chord_data[b % cycle]
-            next_root, _ = chord_data[(b + 1) % cycle]
-            self._chord(chords_inst, root, intervals, t, bar, beat)
-            self._bass(bass_inst, root, next_root, t, bar, beat, context.swing)
-            if random.random() < context.melody_density:
-                self._melody_motif(melody_inst, root, scale, t, bar, beat)
+            chord_index = (b // harmonic_span) % cycle
+            next_chord_index = ((b + 1) // harmonic_span) % cycle
+            root, intervals = chord_data[chord_index]
+            next_root, _ = chord_data[next_chord_index]
+
+            if b % harmonic_span == 0:
+                span_bars = min(harmonic_span, context.bars - b)
+                chord_notes = _voice_lead(_voicing(root, intervals, base_octave=4), previous_chord_notes)
+                self._chord(chords_inst, chord_notes, t, bar * span_bars, beat)
+                previous_chord_notes = chord_notes
+
+            add_pickup = next_chord_index != chord_index
+            self._bass(
+                bass_inst,
+                root,
+                next_root,
+                t,
+                bar,
+                beat,
+                context.swing,
+                context.density,
+                add_pickup,
+            )
+            if not has_source_melody and random.random() < context.melody_density:
+                previous_melody_pitch = self._melody_motif(
+                    melody_inst,
+                    root,
+                    scale,
+                    t,
+                    bar,
+                    beat,
+                    previous_melody_pitch,
+                )
             self._drums(drums_inst, t, beat, bar, context.swing, context.density)
 
-        self._add_sustain(chords_inst, context.bars * bar)
-        self._add_sustain(melody_inst, context.bars * bar, value=72)
+        if has_source_melody:
+            self._source_melody(melody_inst, context.melody_notes or [], context.duration_seconds)
+
+        self._merge_near_repeated_notes(chords_inst, max_gap=beat * 0.08)
+        self._merge_near_repeated_notes(melody_inst, max_gap=beat * 0.05)
         midi.instruments.extend([chords_inst, bass_inst, melody_inst, drums_inst])
 
         if context.seed is not None:
@@ -127,15 +187,14 @@ class RuleBasedBackend:
 
     # ------------------------------------------------------------------ #
 
-    def _chord(self, inst, root, intervals, t0, bar_dur, beat):
-        notes = _voicing(root, intervals, base_octave=4)
-        arpeggiate = random.random() < 0.45
-        dur = bar_dur * random.uniform(1.02, 1.14)
+    def _chord(self, inst, notes, t0, bar_dur, beat):
+        arpeggiate = random.random() < 0.35
+        dur = bar_dur + beat * random.uniform(0.06, 0.18)
 
         for i, pitch in enumerate(notes):
-            onset = _jitter(t0 + (i * 0.045 if arpeggiate else 0.0), 0.008)
+            onset = _jitter(t0 + (i * 0.030 if arpeggiate else 0.0), 0.006)
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(48, 8),
+                velocity=_vel(46, 7),
                 pitch=pitch,
                 start=max(0.0, onset),
                 end=max(0.0, onset) + dur,
@@ -146,13 +205,16 @@ class RuleBasedBackend:
             onset = _jitter(t0 + beat * random.choice([2.5, 3.0]), 0.010)
             pitch = notes[-1]
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(34, 6),
+                velocity=_vel(30, 5),
                 pitch=pitch,
                 start=max(0.0, onset),
-                end=max(0.0, onset) + beat * random.uniform(1.0, 1.7),
+                end=min(t0 + bar_dur + beat * 0.12, max(0.0, onset) + beat * random.uniform(0.8, 1.2)),
             ))
 
-    def _bass(self, inst, root, next_root, t0, bar_dur, beat, swing):
+    def _bass(self, inst, root, next_root, t0, bar_dur, beat, swing, density, add_pickup):
+        if density <= 0.03 or random.random() > 0.35 + density * 0.65:
+            return
+
         root_midi = root + 36  # 2 octaves below middle C
         fifth_midi = root + 43
         next_root_midi = _nearest_pitch(next_root + 36, root_midi)
@@ -161,31 +223,31 @@ class RuleBasedBackend:
 
         # Root on beat 1
         inst.notes.append(pretty_midi.Note(
-            velocity=_vel(62, 7),
+            velocity=_vel(58, 6),
             pitch=root_midi,
             start=_jitter(t0, 0.008),
-            end=t0 + beat * random.uniform(2.05, 2.45),
+            end=t0 + beat * random.uniform(2.0, 2.35),
         ))
         # Syncopated off-beat ghost note
-        if random.random() < 0.55:
+        if random.random() < 0.35 + density * 0.35:
             t2 = t0 + beat * 2.0 + swing_push
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(46, 7),
+                velocity=_vel(42, 6),
                 pitch=fifth_midi if random.random() < 0.3 else root_midi,
                 start=_jitter(t2, 0.010),
-                end=t2 + beat * 1.05,
+                end=t2 + beat * 0.95,
             ))
 
-        if random.random() < 0.72:
+        if add_pickup and random.random() < 0.45 + density * 0.30:
             pickup = t0 + beat * random.choice([3.0, 3.5]) + swing_push * 0.5
             inst.notes.append(pretty_midi.Note(
-                velocity=_vel(42, 6),
+                velocity=_vel(38, 5),
                 pitch=next_root_midi,
                 start=_jitter(pickup, 0.010),
-                end=t0 + bar_dur + beat * 0.20,
+                end=t0 + bar_dur + beat * 0.10,
             ))
 
-    def _melody_motif(self, inst, root, scale, t0, bar_dur, beat):
+    def _melody_motif(self, inst, root, scale, t0, bar_dur, beat, previous_pitch):
         root_idx = root % 12
         # Build scale notes in the singable octave (C4–C6)
         candidates = []
@@ -204,7 +266,7 @@ class RuleBasedBackend:
         chosen_offsets = [start_step * 0.5 + i * spacing for i in range(n_notes)]
         chosen_offsets = [offset for offset in chosen_offsets if offset < 3.75]
 
-        prev = candidates[len(candidates) // 2]
+        prev = previous_pitch if previous_pitch in candidates else candidates[len(candidates) // 2]
         for offset in chosen_offsets:
             # Stepwise motion bias — feels more musical
             nearby = [c for c in candidates if abs(c - prev) <= 4] or candidates
@@ -218,8 +280,35 @@ class RuleBasedBackend:
                 end=onset + dur,
             ))
             prev = pitch
+        return prev
+
+    def _source_melody(self, inst, notes, duration_seconds):
+        for start, end, pitch in notes:
+            start = max(0.0, float(start))
+            if start >= duration_seconds:
+                continue
+
+            end = min(float(end), duration_seconds)
+            if end <= start:
+                end = start + 0.12
+
+            pitch = int(pitch)
+            while pitch < 48:
+                pitch += 12
+            while pitch > 88:
+                pitch -= 12
+
+            inst.notes.append(pretty_midi.Note(
+                velocity=_vel(52, 9),
+                pitch=max(21, min(108, pitch)),
+                start=start,
+                end=max(start + 0.08, end),
+            ))
 
     def _drums(self, inst, t0, beat, bar_dur, swing, density):
+        if density <= 0.03:
+            return
+
         KICK    = 36
         SNARE   = 38
         HIHAT_C = 42
@@ -227,28 +316,42 @@ class RuleBasedBackend:
 
         swing_push = (swing - 0.5) * beat if swing > 0.5 else 0.0
 
-        # Kick: always beat 1, probabilistic beat 3
-        inst.notes.append(pretty_midi.Note(_vel(66, 7), KICK, _jitter(t0, 0.006), t0 + 0.12))
+        # Kick: strong at higher density, optional for sparse/piano presets
+        if random.random() < min(0.25 + density * 0.85, 0.95):
+            inst.notes.append(pretty_midi.Note(_vel(62, 6), KICK, _jitter(t0, 0.006), t0 + 0.12))
         if random.random() < 0.45 * density:
             t3 = t0 + beat * 2.5
-            inst.notes.append(pretty_midi.Note(_vel(56, 9), KICK, _jitter(t3, 0.010), t3 + 0.11))
+            inst.notes.append(pretty_midi.Note(_vel(52, 8), KICK, _jitter(t3, 0.010), t3 + 0.11))
 
         # Snare: beat 3
-        t_snare = t0 + beat * 2
-        inst.notes.append(pretty_midi.Note(_vel(58, 8), SNARE, _jitter(t_snare, 0.010), t_snare + 0.16))
+        if random.random() < min(0.20 + density * 0.80, 0.95):
+            t_snare = t0 + beat * 2
+            inst.notes.append(pretty_midi.Note(_vel(54, 7), SNARE, _jitter(t_snare, 0.010), t_snare + 0.16))
 
         # Hi-hats: 8th notes with swing on the off-beats
         for eighth in range(8):
             t_hat = t0 + eighth * (beat / 2.0)
             if eighth % 2 == 1:
                 t_hat += swing_push
-            if random.random() > 0.20:  # occasional drop for groove
+            if random.random() < density * 0.90:
                 hat = HIHAT_O if eighth % 4 == 2 and random.random() < 0.18 else HIHAT_C
-                vel = _vel(34 if eighth % 2 == 0 else 27, 7)
+                vel = _vel(30 if eighth % 2 == 0 else 24, 6)
                 inst.notes.append(pretty_midi.Note(vel, hat, _jitter(t_hat, 0.006), t_hat + 0.075))
 
-    def _add_sustain(self, inst, duration, value=86):
-        if duration <= 0:
+    def _merge_near_repeated_notes(self, inst, max_gap):
+        if not inst.notes:
             return
-        inst.control_changes.append(pretty_midi.ControlChange(64, value, 0.0))
-        inst.control_changes.append(pretty_midi.ControlChange(64, 0, duration + 0.5))
+
+        merged: list[pretty_midi.Note] = []
+        for note in sorted(inst.notes, key=lambda n: (n.pitch, n.start, n.end)):
+            if (
+                merged
+                and merged[-1].pitch == note.pitch
+                and note.start <= merged[-1].end + max_gap
+            ):
+                merged[-1].end = max(merged[-1].end, note.end)
+                merged[-1].velocity = max(merged[-1].velocity, note.velocity)
+            else:
+                merged.append(note)
+
+        inst.notes = sorted(merged, key=lambda n: (n.start, n.pitch, n.end))

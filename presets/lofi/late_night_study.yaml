@@ -2,10 +2,10 @@ name: late_night_study
 style: lofi
 bpm_range: [72, 85]
 scale_bias: minor
-swing: 0.54
-drum_density: 0.32
-melody_density: 0.18
-chord_extensions: [7, 9]
+swing: 0.53
+drum_density: 0.22
+melody_density: 0.12
+chord_extensions: [7, 9, 11]
 mood: "focused, calm, late night"
 instruments:
   chords: felt_piano
@@ -13,9 +13,9 @@ instruments:
   bass: muted_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.10
-  tape_wow: 0.04
-  lowpass_hz: 7400
-  reverb: 0.32
+  vinyl_noise: 0.08
+  tape_wow: 0.03
+  lowpass_hz: 7000
+  reverb: 0.42
   compression: gentle
-  saturation: 0.04
+  saturation: 0.03

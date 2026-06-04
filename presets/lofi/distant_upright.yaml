@@ -4,7 +4,7 @@ bpm_range: [54, 68]
 scale_bias: major
 swing: 0.50
 drum_density: 0.00
-melody_density: 0.14
+melody_density: 0.10
 chord_extensions: [7, 9, 11]
 mood: "distant, roomy, reflective"
 instruments:
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.03
-  tape_wow: 0.04
-  lowpass_hz: 6800
-  reverb: 0.68
+  tape_wow: 0.03
+  lowpass_hz: 6500
+  reverb: 0.72
   compression: gentle
   saturation: 0.01

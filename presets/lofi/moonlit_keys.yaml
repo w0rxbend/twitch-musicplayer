@@ -3,8 +3,8 @@ style: lofi
 bpm_range: [60, 74]
 scale_bias: minor
 swing: 0.51
-drum_density: 0.04
-melody_density: 0.18
+drum_density: 0.00
+melody_density: 0.12
 chord_extensions: [7, 9, 11]
 mood: "moonlit, sparse, melancholic"
 instruments:
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.05
-  tape_wow: 0.05
-  lowpass_hz: 7000
-  reverb: 0.56
+  tape_wow: 0.04
+  lowpass_hz: 6600
+  reverb: 0.64
   compression: gentle
   saturation: 0.02

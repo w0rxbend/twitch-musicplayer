@@ -22,7 +22,10 @@ def extract_melody(path: str | Path) -> Optional[list[tuple[float, float, int]]]
         ]
         return notes or None
     except ImportError:
-        logger.debug("basic-pitch not installed (pip install lofi-maker[melody])")
+        logger.warning(
+            "Basic Pitch not available. Install optional deps with: "
+            "pipx run uv sync --extra melody"
+        )
         return None
     except Exception as exc:
         logger.warning("Melody extraction failed: %s", exc)

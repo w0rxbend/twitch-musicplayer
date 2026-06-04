@@ -2,10 +2,10 @@ name: warm_rhodes_loop
 style: lofi
 bpm_range: [76, 90]
 scale_bias: major
-swing: 0.56
-drum_density: 0.40
-melody_density: 0.18
-chord_extensions: [7, 9]
+swing: 0.53
+drum_density: 0.28
+melody_density: 0.12
+chord_extensions: [7, 9, 11]
 mood: "rounded, simple, looping"
 instruments:
   chords: rhodes
@@ -13,9 +13,9 @@ instruments:
   bass: muted_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.12
-  tape_wow: 0.08
-  lowpass_hz: 8200
-  reverb: 0.28
+  vinyl_noise: 0.09
+  tape_wow: 0.05
+  lowpass_hz: 7600
+  reverb: 0.38
   compression: gentle
-  saturation: 0.09
+  saturation: 0.06

@@ -1,21 +1,21 @@
-name: deep_space_ambient
+name: slow_orbit
 style: lofi
-bpm_range: [55, 68]
+bpm_range: [52, 66]
 scale_bias: minor
 swing: 0.50
-drum_density: 0.04
-melody_density: 0.06
+drum_density: 0.02
+melody_density: 0.05
 chord_extensions: [9, 11]
-mood: "wide, slow, cosmic"
+mood: "slow orbit, dark, weightless"
 instruments:
   chords: pad
   melody: felt_piano
-  bass: muted_bass
+  bass: synth_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.04
+  vinyl_noise: 0.03
   tape_wow: 0.04
-  lowpass_hz: 5800
-  reverb: 0.70
+  lowpass_hz: 5400
+  reverb: 0.78
   compression: gentle
   saturation: 0.02

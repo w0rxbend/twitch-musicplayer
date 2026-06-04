@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import secrets
 import sys
 import time
 import tempfile
@@ -64,7 +65,79 @@ def generate_preset(
     model: Optional[str],
 ) -> None:
     """Generate an original lofi beat from a preset."""
-    import soundfile as sf
+    _generate_preset_audio(
+        preset_name=preset_name,
+        duration=duration,
+        output=output,
+        seed=seed,
+        out_dir=out_dir,
+        soundfont=soundfont,
+        transformer=transformer,
+        model=model,
+        output_name=preset_name,
+    )
+
+
+# ------------------------------------------------------------------ #
+# songgen generate-random
+# ------------------------------------------------------------------ #
+
+@cli.command("generate-random")
+@click.argument("preset_name")
+@click.option("--count", default=1, show_default=True, help="Number of random versions to generate")
+@click.option("--duration", default=90.0, show_default=True, help="Duration in seconds")
+@click.option("--output", default="mp3", show_default=True, help="Comma-separated: midi,wav,mp3")
+@click.option("--out-dir", "out_dir", type=click.Path(), default=".", show_default=True)
+@click.option("--soundfont", type=click.Path(exists=True), default=None)
+@click.option("--transformer", is_flag=True, default=False, help="Use open-weight transformer backend")
+@click.option("--model", default=None, help="HuggingFace model ID (default: sander-wood/text-to-music)")
+def generate_random(
+    preset_name: str,
+    count: int,
+    duration: float,
+    output: str,
+    out_dir: str,
+    soundfont: Optional[str],
+    transformer: bool,
+    model: Optional[str],
+) -> None:
+    """Generate one or more random versions from a preset."""
+    if count < 1:
+        click.echo("Error: count must be at least 1", err=True)
+        sys.exit(1)
+
+    for index in range(1, count + 1):
+        seed = secrets.randbelow(2_147_483_647)
+        output_name = f"{preset_name}_random_{seed}"
+        if count > 1:
+            click.echo(f"\nRandom version {index}/{count} (seed={seed})")
+        else:
+            click.echo(f"Random version seed={seed}")
+
+        _generate_preset_audio(
+            preset_name=preset_name,
+            duration=duration,
+            output=output,
+            seed=seed,
+            out_dir=out_dir,
+            soundfont=soundfont,
+            transformer=transformer,
+            model=model,
+            output_name=output_name,
+        )
+
+
+def _generate_preset_audio(
+    preset_name: str,
+    duration: float,
+    output: str,
+    seed: Optional[int],
+    out_dir: str,
+    soundfont: Optional[str],
+    transformer: bool,
+    model: Optional[str],
+    output_name: str,
+) -> None:
     from .presets.loader import load_preset
     from .core.lofi_arranger import from_preset
     from .render.soundfont import midi_to_wav
@@ -80,7 +153,10 @@ def generate_preset(
     ctx = from_preset(preset, duration_seconds=duration, seed=seed)
     backend = _make_backend(transformer, model)
 
-    click.echo(f"Generating '{preset_name}' — {ctx.bpm:.0f} bpm, {ctx.key}, {duration:.0f}s")
+    click.echo(
+        f"Generating '{preset_name}' — {ctx.bpm:.0f} bpm, {ctx.key}, "
+        f"{duration:.0f}s"
+    )
     midi = backend.generate_midi(ctx)
 
     out_path = Path(out_dir)
@@ -88,18 +164,20 @@ def generate_preset(
     formats = [f.strip() for f in output.split(",")]
 
     if "midi" in formats:
-        midi_out = out_path / f"{preset_name}.mid"
+        midi_out = out_path / f"{output_name}.mid"
         midi.write(str(midi_out))
         click.echo(f"  MIDI  → {midi_out}")
 
     if "wav" in formats or "mp3" in formats:
+        import soundfile as sf
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_wav = Path(tmp.name)
         try:
             midi_to_wav(midi, tmp_wav, soundfont=soundfont)
             audio, sr = sf.read(str(tmp_wav))
             audio = apply_lofi_effects(audio, sr, preset.effects)
-            for fmt, path in export_audio(audio, sr, out_path / preset_name, formats=formats).items():
+            for fmt, path in export_audio(audio, sr, out_path / output_name, formats=formats).items():
                 click.echo(f"  {fmt.upper():<5} → {path}")
         finally:
             tmp_wav.unlink(missing_ok=True)
@@ -111,10 +189,11 @@ def generate_preset(
 
 @cli.command("remake-lofi")
 @click.argument("input_file", type=click.Path(exists=True))
-@click.option("--preset", default="rainy_window", show_default=True)
-@click.option("--preserve-melody", is_flag=True, default=False)
-@click.option("--preserve-vocal-chops", is_flag=True, default=False,
-              help="Separate stems with Demucs (slow on CPU, needs extras[stems])")
+@click.option("--skip-stems", is_flag=True, default=False,
+              help="Skip Demucs stem separation before analysis")
+@click.option("--preset", default=None, hidden=True)
+@click.option("--preserve-melody", is_flag=True, default=False, hidden=True)
+@click.option("--preserve-vocal-chops", is_flag=True, default=False, hidden=True)
 @click.option("--duration", default=90.0, show_default=True)
 @click.option("--output", default="mp3", show_default=True)
 @click.option("--seed", type=int, default=None)
@@ -124,7 +203,8 @@ def generate_preset(
 @click.option("--model", default=None)
 def remake_lofi(
     input_file: str,
-    preset: str,
+    skip_stems: bool,
+    preset: Optional[str],
     preserve_melody: bool,
     preserve_vocal_chops: bool,
     duration: float,
@@ -137,63 +217,130 @@ def remake_lofi(
 ) -> None:
     """Create a lofi reinterpretation of any song."""
     import soundfile as sf
-    from .presets.loader import load_preset
     from .analysis.song_analyzer import analyze_song
     from .analysis.melody_extractor import extract_melody
-    from .core.lofi_arranger import apply_preset_to_context
+    from .core.lofi_arranger import build_cover_context, cover_effects_from_context
     from .render.soundfont import midi_to_wav
     from .render.effects import apply_lofi_effects
     from .render.export import export_audio
 
-    try:
-        preset_obj = load_preset(preset)
-    except FileNotFoundError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
-
     input_path = Path(input_file)
-    click.echo(f"Analysing: {input_path.name}")
-    ctx = analyze_song(input_path, duration_seconds=duration, seed=seed)
-    click.echo(f"  Key: {ctx.key}  BPM: {ctx.bpm:.1f}  Energy: {ctx.energy:.2f}")
+    if preset:
+        click.echo("Ignoring --preset: remake-lofi is source-driven now.")
+    if preserve_melody or preserve_vocal_chops:
+        click.echo("Melody extraction and stem separation are part of the remake pipeline now.")
 
-    if preserve_melody:
-        click.echo("  Extracting melody (Basic Pitch)…")
-        notes = extract_melody(input_path)
-        if notes:
-            ctx.melody_notes = notes
-            click.echo(f"  {len(notes)} melody notes extracted")
-        else:
-            click.echo("  Basic Pitch unavailable or no notes found")
-
-    if preserve_vocal_chops:
-        click.echo("  Separating stems (Demucs CPU — expect 5-20 min)…")
+    click.echo(f"Cover-generation pipeline: {input_path.name}")
+    stems = None
+    stem_tmp_paths: list[Path] = []
+    analysis_path = input_path
+    melody_path = input_path
+    if not skip_stems:
+        click.echo("  Demucs stem separation...")
         from .stems.separator import separate_stems
         stems = separate_stems(input_path)
         if stems:
-            click.echo(f"  Stems ready: {stems.available_stems}")
+            click.echo(f"  Stems ready: {', '.join(stems.available_stems)}")
+            analysis_audio = _mix_stem_audio(stems.other, stems.bass)
+            if analysis_audio is not None:
+                analysis_path = _write_temp_audio(analysis_audio, stems.sr, "_analysis.wav")
+                stem_tmp_paths.append(analysis_path)
 
-    ctx = apply_preset_to_context(ctx, preset_obj)
-    backend = _make_backend(transformer, model)
-
-    click.echo(f"Generating lofi remake — {ctx.bpm:.0f} bpm, {ctx.key}")
-    midi = backend.generate_midi(ctx)
-
-    out_path = Path(out_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
-    formats = [f.strip() for f in output.split(",")]
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp_wav = Path(tmp.name)
+            melody_audio = stems.vocals if stems.vocals is not None else stems.other
+            if melody_audio is not None:
+                melody_path = _write_temp_audio(melody_audio, stems.sr, "_melody.wav")
+                stem_tmp_paths.append(melody_path)
+        else:
+            click.echo("  Demucs unavailable or failed; continuing with full-mix analysis")
+            click.echo(f"  Install stems: {_optional_dependency_install_hint('stems')}")
 
     try:
-        midi_to_wav(midi, tmp_wav, soundfont=soundfont)
-        audio, sr = sf.read(str(tmp_wav))
-        audio = apply_lofi_effects(audio, sr, preset_obj.effects)
+        click.echo("  Tempo/key/chord/melody analysis...")
+        ctx = analyze_song(analysis_path, duration_seconds=duration, seed=seed)
+        click.echo(
+            f"  Key: {ctx.key}  Source BPM: {ctx.source_bpm or ctx.bpm:.1f}  "
+            f"Cover BPM: {ctx.bpm:.1f}  Energy: {ctx.energy:.2f}"
+        )
+
+        click.echo("  Basic Pitch melody transcription...")
+        notes = extract_melody(melody_path)
+        if notes:
+            ctx.melody_notes = notes
+            click.echo(f"  {len(notes)} source melody notes extracted")
+        else:
+            click.echo("  Basic Pitch unavailable or no melody found; generating a sparse guide melody")
+            click.echo(f"  Install melody transcription: {_optional_dependency_install_hint('melody')}")
+
+        click.echo("  Arrangement transformation + new instrumentation...")
+        ctx = build_cover_context(ctx)
+        effects_cfg = cover_effects_from_context(ctx)
+        backend = _make_backend(transformer, model)
+
+        click.echo(f"  MIDI + generated layers: {ctx.bpm:.0f} bpm, {ctx.key}")
+        midi = backend.generate_midi(ctx)
+
+        out_path = Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        formats = [f.strip() for f in output.split(",")]
         stem_name = input_path.stem + "_lofi"
-        for fmt, path in export_audio(audio, sr, out_path / stem_name, formats=formats).items():
-            click.echo(f"  {fmt.upper():<5} → {path}")
+
+        if "midi" in formats:
+            midi_out = out_path / f"{stem_name}.mid"
+            midi.write(str(midi_out))
+            click.echo(f"  MIDI  → {midi_out}")
+
+        if "wav" in formats or "mp3" in formats:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_wav = Path(tmp.name)
+
+            try:
+                midi_to_wav(midi, tmp_wav, soundfont=soundfont)
+                audio, sr = sf.read(str(tmp_wav))
+                click.echo("  Rendering + mixing/mastering...")
+                audio = apply_lofi_effects(audio, sr, effects_cfg)
+                for fmt, path in export_audio(audio, sr, out_path / stem_name, formats=formats).items():
+                    click.echo(f"  {fmt.upper():<5} → {path}")
+            finally:
+                tmp_wav.unlink(missing_ok=True)
     finally:
-        tmp_wav.unlink(missing_ok=True)
+        for path in stem_tmp_paths:
+            path.unlink(missing_ok=True)
+
+
+def _mix_stem_audio(*stems):
+    import numpy as np
+
+    available = [stem for stem in stems if stem is not None]
+    if not available:
+        return None
+
+    length = min(len(stem) for stem in available)
+    if length <= 0:
+        return None
+
+    mixed = np.zeros(length, dtype=np.float32)
+    for stem in available:
+        mixed += stem[:length].astype(np.float32)
+
+    peak = float(np.max(np.abs(mixed))) if mixed.size else 0.0
+    if peak > 1.0:
+        mixed /= peak
+    return mixed
+
+
+def _write_temp_audio(audio, sr: int, suffix: str) -> Path:
+    import soundfile as sf
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        path = Path(tmp.name)
+    sf.write(str(path), audio, sr)
+    return path
+
+
+def _optional_dependency_install_hint(extra: str) -> str:
+    if Path("uv.lock").exists():
+        return f"pipx run uv sync --extra {extra}"
+    return f"{sys.executable} -m pip install -e '.[{extra}]'"
 
 
 # ------------------------------------------------------------------ #

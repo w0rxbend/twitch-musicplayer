@@ -46,6 +46,35 @@ def test_apply_preset_to_context_clamps_bpm():
     assert result.bpm >= preset.bpm_range[0]
 
 
+def test_build_cover_context_keeps_and_slows_source_melody():
+    from lofi_maker.core.music_context import MusicContext
+    from lofi_maker.core.lofi_arranger import build_cover_context
+
+    ctx = MusicContext(
+        bpm=88.0,
+        source_bpm=100.0,
+        duration_seconds=10.0,
+        melody_notes=[(1.0, 1.5, 64), (12.0, 12.5, 67)],
+        energy=0.4,
+        seed=1,
+    )
+    result = build_cover_context(ctx)
+
+    assert result.melody_notes == [(100.0 / 88.0, 1.5 * (100.0 / 88.0), 64)]
+    assert result.melody_density == 0.0
+    assert result.melody_instrument == "felt_piano"
+
+
+def test_cover_effects_from_context_returns_source_driven_effects():
+    from lofi_maker.core.music_context import MusicContext
+    from lofi_maker.core.lofi_arranger import cover_effects_from_context
+
+    effects = cover_effects_from_context(MusicContext(energy=0.25))
+
+    assert effects.reverb > 0
+    assert effects.lowpass_hz > 0
+
+
 def test_music_context_is_minor():
     from lofi_maker.core.music_context import MusicContext
     assert MusicContext(key="A minor").is_minor

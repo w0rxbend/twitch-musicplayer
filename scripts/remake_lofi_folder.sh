@@ -9,11 +9,13 @@ Usage:
 Examples:
   scripts/remake_lofi_folder.sh ncs_music output/ncs_lofi
   scripts/remake_lofi_folder.sh ncs_music output/ncs_lofi -- --duration 120 --output mp3
+  scripts/remake_lofi_folder.sh ncs_music output/ncs_lofi -- --skip-stems
 
 Environment:
-  PRESETS_DIR  Directory containing preset .yaml files. Defaults to presets/lofi.
-  RANDOM_SEED  Optional bash RANDOM seed for reproducible preset choices.
   SONGGEN_BIN  Path to songgen executable. Defaults to .venv/bin/songgen, then songgen from PATH.
+
+Optional full cover pipeline deps:
+  pipx run uv sync --extra stems --extra melody
 EOF
 }
 
@@ -30,7 +32,7 @@ fi
 input_dir=$1
 shift
 
-out_dir="output/remake_lofi_batch"
+out_dir="output/remake_lofi_batch_$(date +%Y%m%d_%H%M%S)"
 if [[ $# -gt 0 && "${1:-}" != "--" ]]; then
   out_dir=$1
   shift
@@ -58,33 +60,6 @@ if [[ -z "$songgen" || ! -x "$songgen" ]]; then
   exit 1
 fi
 
-for arg in "$@"; do
-  if [[ "$arg" == "--preset" || "$arg" == --preset=* ]]; then
-    echo "Error: do not pass --preset; this script chooses a random preset per song." >&2
-    exit 2
-  fi
-done
-
-presets_dir="${PRESETS_DIR:-presets/lofi}"
-if [[ ! -d "$presets_dir" ]]; then
-  echo "Error: presets directory does not exist: $presets_dir" >&2
-  exit 1
-fi
-
-presets=()
-while IFS= read -r -d '' preset_file; do
-  presets+=("$(basename "$preset_file" .yaml)")
-done < <(find "$presets_dir" -maxdepth 1 -type f -name '*.yaml' -print0 | sort -z)
-
-if [[ ${#presets[@]} -eq 0 ]]; then
-  echo "Error: no .yaml presets found in: $presets_dir" >&2
-  exit 1
-fi
-
-if [[ -n "${RANDOM_SEED:-}" ]]; then
-  RANDOM=$RANDOM_SEED
-fi
-
 mkdir -p "$out_dir"
 
 total=0
@@ -93,12 +68,10 @@ failed=0
 
 while IFS= read -r -d '' mp3_file; do
   total=$((total + 1))
-  preset=${presets[$((RANDOM % ${#presets[@]}))]}
   echo
   echo "[$total] Remaking: $mp3_file"
-  echo "     Preset: $preset"
 
-  if "$songgen" remake-lofi "$mp3_file" --preset "$preset" --out-dir "$out_dir" "$@"; then
+  if "$songgen" remake-lofi "$mp3_file" --out-dir "$out_dir" "$@"; then
     ok=$((ok + 1))
   else
     failed=$((failed + 1))

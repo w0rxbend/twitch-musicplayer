@@ -1,12 +1,12 @@
-name: alone_at_piano
+name: blue_hour_piano
 style: lofi
-bpm_range: [58, 72]
+bpm_range: [56, 70]
 scale_bias: minor
 swing: 0.50
 drum_density: 0.00
-melody_density: 0.14
+melody_density: 0.12
 chord_extensions: [9, 11]
-mood: "solitary, intimate, quiet"
+mood: "blue hour, lonely, tender"
 instruments:
   chords: felt_piano
   melody: felt_piano
@@ -14,8 +14,8 @@ instruments:
   drums: soft_kit
 effects:
   vinyl_noise: 0.04
-  tape_wow: 0.02
-  lowpass_hz: 7200
-  reverb: 0.58
+  tape_wow: 0.03
+  lowpass_hz: 6700
+  reverb: 0.66
   compression: gentle
-  saturation: 0.02
+  saturation: 0.01

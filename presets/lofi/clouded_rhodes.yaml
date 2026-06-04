@@ -1,21 +1,21 @@
-name: cassette_clouds
+name: clouded_rhodes
 style: lofi
-bpm_range: [66, 80]
+bpm_range: [70, 84]
 scale_bias: major
 swing: 0.52
 drum_density: 0.20
-melody_density: 0.14
+melody_density: 0.10
 chord_extensions: [7, 9, 11]
-mood: "soft, hazy, nostalgic"
+mood: "clouded, warm, unhurried"
 instruments:
   chords: rhodes
   melody: felt_piano
-  bass: muted_bass
+  bass: upright_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.09
-  tape_wow: 0.07
-  lowpass_hz: 7200
-  reverb: 0.40
+  vinyl_noise: 0.08
+  tape_wow: 0.05
+  lowpass_hz: 7400
+  reverb: 0.44
   compression: gentle
   saturation: 0.05

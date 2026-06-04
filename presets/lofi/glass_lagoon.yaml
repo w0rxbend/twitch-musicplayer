@@ -1,21 +1,21 @@
-name: ocean_floor
+name: glass_lagoon
 style: lofi
-bpm_range: [54, 66]
-scale_bias: minor
+bpm_range: [54, 68]
+scale_bias: major
 swing: 0.50
 drum_density: 0.02
 melody_density: 0.05
 chord_extensions: [9, 11]
-mood: "submerged, dark, weightless"
+mood: "clear water, still, luminous"
 instruments:
   chords: pad
   melody: felt_piano
   bass: muted_bass
   drums: soft_kit
 effects:
-  vinyl_noise: 0.03
-  tape_wow: 0.04
-  lowpass_hz: 5200
-  reverb: 0.74
+  vinyl_noise: 0.02
+  tape_wow: 0.03
+  lowpass_hz: 5600
+  reverb: 0.76
   compression: gentle
-  saturation: 0.02
+  saturation: 0.01

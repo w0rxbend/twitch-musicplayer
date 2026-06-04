@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 def apply_lofi_effects(audio: np.ndarray, sr: int, config: EffectsConfig) -> np.ndarray:
     audio = audio.astype(np.float32)
+    audio = _pad_tail(audio, sr, seconds=max(0.45, min(2.5, 0.6 + config.reverb * 3.0)))
 
     # --- pedalboard chain ---------------------------------------------------
     try:
@@ -66,6 +67,18 @@ def _vinyl_noise(audio: np.ndarray, amount: float) -> np.ndarray:
         0.0,
     )
     return audio + noise + crackle
+
+
+def _pad_tail(audio: np.ndarray, sr: int, seconds: float) -> np.ndarray:
+    tail_len = int(sr * seconds)
+    if tail_len <= 0:
+        return audio
+
+    if audio.ndim == 1:
+        tail = np.zeros(tail_len, dtype=audio.dtype)
+    else:
+        tail = np.zeros((tail_len, audio.shape[1]), dtype=audio.dtype)
+    return np.concatenate([audio, tail], axis=0)
 
 
 def _tape_wow(audio: np.ndarray, sr: int, amount: float) -> np.ndarray:

@@ -1,12 +1,12 @@
-name: felt_piano_morning
+name: lantern_keys
 style: lofi
-bpm_range: [66, 80]
+bpm_range: [60, 74]
 scale_bias: major
-swing: 0.52
-drum_density: 0.04
-melody_density: 0.14
+swing: 0.51
+drum_density: 0.00
+melody_density: 0.13
 chord_extensions: [7, 9, 11]
-mood: "gentle, morning, hopeful"
+mood: "warm lantern, intimate, slow"
 instruments:
   chords: felt_piano
   melody: felt_piano
@@ -15,7 +15,7 @@ instruments:
 effects:
   vinyl_noise: 0.05
   tape_wow: 0.04
-  lowpass_hz: 7400
-  reverb: 0.48
+  lowpass_hz: 7100
+  reverb: 0.60
   compression: gentle
   saturation: 0.02

@@ -15,8 +15,13 @@ class MusicContext:
     swing: float = 0.55
     seed: Optional[int] = None
     source_file: Optional[str] = None
+    source_bpm: Optional[float] = None
     melody_notes: Optional[list[tuple[float, float, int]]] = None  # (start, end, pitch)
     energy: float = 0.5
+    chord_instrument: str = "rhodes"
+    melody_instrument: str = "felt_piano"
+    bass_instrument: str = "muted_bass"
+    drums_instrument: str = "soft_kit"
 
     @property
     def is_minor(self) -> bool:
