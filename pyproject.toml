@@ -27,20 +27,20 @@ dependencies = [
 
 [project.optional-dependencies]
 ai = [
-    "transformers>=4.46.0,<4.48",
+    "transformers>=5.0.0rc3,<5.1",
     "torch>=2.1.0",
     "music21>=9.1.0",
     "sentencepiece>=0.1.99",
     "accelerate>=0.24.0",
 ]
 musicgen = [
-    "transformers>=4.46.0,<4.48",
+    "transformers>=5.0.0rc3,<5.1",
     "torch>=2.1.0",
     "sentencepiece>=0.1.99",
     "accelerate>=0.24.0",
 ]
 musicgen-openvino = [
-    "transformers>=4.46.0,<4.48",
+    "transformers>=5.0.0rc3,<5.1",
     "torch>=2.1.0",
     "sentencepiece>=0.1.99",
     "accelerate>=0.24.0",
