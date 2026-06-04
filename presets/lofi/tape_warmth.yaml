@@ -1,0 +1,21 @@
+name: tape_warmth
+style: lofi
+bpm_range: [74, 88]
+scale_bias: major
+swing: 0.55
+drum_density: 0.48
+melody_density: 0.28
+chord_extensions: [7, 9]
+mood: "warm, vintage, nostalgic"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: upright_bass
+  drums: brush_kit
+effects:
+  vinyl_noise: 0.16
+  tape_wow: 0.12
+  lowpass_hz: 9000
+  reverb: 0.20
+  compression: medium
+  saturation: 0.15

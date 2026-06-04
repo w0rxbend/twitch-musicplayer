@@ -1,0 +1,21 @@
+name: rainy_window
+style: lofi
+bpm_range: [68, 82]
+scale_bias: minor
+swing: 0.58
+drum_density: 0.45
+melody_density: 0.22
+chord_extensions: [7, 9, 11]
+mood: "soft, melancholic, introspective"
+instruments:
+  chords: rhodes
+  melody: felt_piano
+  bass: muted_bass
+  drums: soft_kit
+effects:
+  vinyl_noise: 0.18
+  tape_wow: 0.08
+  lowpass_hz: 8500
+  reverb: 0.22
+  compression: gentle
+  saturation: 0.06
