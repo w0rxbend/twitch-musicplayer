@@ -113,6 +113,36 @@ def unflatten_musicgen_cache(flattened, encoder_decoder_cache_cls):
     return encoder_decoder_cache_cls(layers)
 
 
+def normalize_encodec_code_length(output_ids, target_length: int):
+    target_length = int(target_length)
+    if target_length <= 0:
+        return output_ids
+
+    current_length = int(output_ids.shape[-1])
+    if current_length == target_length:
+        return output_ids
+    if current_length > target_length:
+        return output_ids[..., :target_length]
+
+    pad_length = target_length - current_length
+    if hasattr(output_ids, "new_zeros"):
+        import torch
+
+        if current_length > 0:
+            pad = output_ids[..., -1:].expand(*output_ids.shape[:-1], pad_length)
+        else:
+            pad = output_ids.new_zeros((*output_ids.shape[:-1], pad_length))
+        return torch.cat([output_ids, pad], dim=-1)
+
+    pad_source = output_ids[..., -1:] if current_length > 0 else np.zeros((*output_ids.shape[:-1], 1), dtype=output_ids.dtype)
+    pad = np.repeat(pad_source, pad_length, axis=-1)
+    return np.concatenate([output_ids, pad], axis=-1)
+
+
+def short_exception_message(exc: BaseException) -> str:
+    return str(exc).splitlines()[0] if str(exc).splitlines() else repr(exc)
+
+
 class MusicGenSmallBackend:
     """
     Text-to-music audio backend for facebook/musicgen-small.
@@ -477,15 +507,33 @@ class MusicGenSmallBackend:
                 )
 
         class AudioDecoderWrapper(torch.nn.Module):
-            def __init__(self, decoder_ir, config):
+            def __init__(self, decoder_ir, config, torch_decoder, expected_code_length: int):
                 super().__init__()
                 self.decoder = core.compile_model(decoder_ir, device)
                 self.config = config
+                self.torch_decoder = torch_decoder
+                self.expected_code_length = expected_code_length
                 self.output_type = namedtuple("AudioDecoderOutput", ["audio_values"])
 
             def decode(self, output_ids, audio_scales):
-                output = self.decoder(output_ids)[self.decoder.outputs[0]]
-                return self.output_type(audio_values=torch.tensor(output))
+                original_length = int(output_ids.shape[-1])
+                output_ids = normalize_encodec_code_length(output_ids, self.expected_code_length)
+                if original_length != self.expected_code_length:
+                    logger.debug(
+                        "Adjusted MusicGen EnCodec code length from %s to %s for OpenVINO decode",
+                        original_length,
+                        self.expected_code_length,
+                    )
+                try:
+                    output = self.decoder(output_ids)[self.decoder.outputs[0]]
+                    return self.output_type(audio_values=torch.tensor(output))
+                except Exception as exc:
+                    logger.warning(
+                        "OpenVINO EnCodec decode failed; falling back to PyTorch decoder: %s",
+                        short_exception_message(exc),
+                    )
+                    with torch.no_grad():
+                        return self.torch_decoder.decode(output_ids, audio_scales)
 
         text_encoder_ov = TextEncoderWrapper(t5_ir_path, model.text_encoder.config)
         musicgen_decoder_ov = MusicGenWrapper(
@@ -496,11 +544,15 @@ class MusicGenSmallBackend:
             model.decoder.build_delay_pattern_mask,
             model.decoder.apply_delay_pattern_mask,
         )
-        audio_encoder_ov = AudioDecoderWrapper(audio_decoder_ir_path, model.audio_encoder.config)
+        audio_encoder_ov = AudioDecoderWrapper(
+            audio_decoder_ir_path,
+            model.audio_encoder.config,
+            model.audio_encoder,
+            expected_code_length=n_tokens - 3,
+        )
 
         del model.text_encoder
         del model.decoder
-        del model.audio_encoder
         gc.collect()
 
         model.text_encoder = text_encoder_ov

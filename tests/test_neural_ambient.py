@@ -5,6 +5,7 @@ from lofi_maker.ai.musicgen import (
     audio_to_numpy,
     configure_openvino_musicgen_config,
     flatten_musicgen_cache,
+    normalize_encodec_code_length,
     openvino_cache_metadata_matches,
     tokens_for_seconds,
     unflatten_musicgen_cache,
@@ -95,6 +96,22 @@ def test_musicgen_cache_unflattening_restores_encoder_decoder_layers():
     cache = unflatten_musicgen_cache(("self_k", "self_v", "cross_k", "cross_v"), FakeEncoderDecoderCache)
 
     assert cache.layers == [("self_k", "self_v", "cross_k", "cross_v")]
+
+
+def test_normalize_encodec_code_length_pads_with_last_code():
+    codes = np.array([[[[1, 2]]]], dtype=np.int64)
+
+    padded = normalize_encodec_code_length(codes, 4)
+
+    assert padded.tolist() == [[[[1, 2, 2, 2]]]]
+
+
+def test_normalize_encodec_code_length_crops_extra_codes():
+    codes = np.array([[[[1, 2, 3, 4]]]], dtype=np.int64)
+
+    cropped = normalize_encodec_code_length(codes, 2)
+
+    assert cropped.tolist() == [[[[1, 2]]]]
 
 
 def test_build_ambient_prompt_uses_preset_context():
