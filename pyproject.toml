@@ -38,7 +38,9 @@ stems = [
     "torch>=2.1.0",
 ]
 melody = [
-    "basic-pitch>=0.3.0",
+    # Basic Pitch depends on TensorFlow wheels that are not available on Python 3.12+.
+    # Python 3.12+ uses the built-in librosa pYIN fallback in melody_extractor.py.
+    "basic-pitch>=0.3.0; python_version < '3.12'",
 ]
 all = ["lofi-maker[ai,stems,melody]"]
 dev = [

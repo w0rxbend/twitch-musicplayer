@@ -16,6 +16,7 @@ Environment:
 
 Optional full cover pipeline deps:
   pipx run uv sync --extra stems --extra melody
+  On Python 3.12+, melody uses the built-in librosa fallback because Basic Pitch/TensorFlow wheels are unavailable.
 EOF
 }
 

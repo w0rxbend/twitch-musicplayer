@@ -338,6 +338,8 @@ def _write_temp_audio(audio, sr: int, suffix: str) -> Path:
 
 
 def _optional_dependency_install_hint(extra: str) -> str:
+    if extra == "melody" and sys.version_info >= (3, 12):
+        return "Basic Pitch requires Python 3.10/3.11; Python 3.12+ uses the built-in librosa fallback"
     if Path("uv.lock").exists():
         return f"pipx run uv sync --extra {extra}"
     return f"{sys.executable} -m pip install -e '.[{extra}]'"
