@@ -712,6 +712,111 @@ def remake_lofi(
             path.unlink(missing_ok=True)
 
 
+# ------------------------------------------------------------------ #
+# songgen cover-chiptune
+# ------------------------------------------------------------------ #
+
+@cli.command("cover-chiptune")
+@click.argument("input_file", type=click.Path(exists=True))
+@click.option("--use-stems", is_flag=True, default=False,
+              help="Use Demucs stems for cleaner melody/harmony analysis")
+@click.option("--duration", type=float, default=None,
+              help="Optional maximum output duration in seconds. Defaults to source length.")
+@click.option("--output", default="mp3", show_default=True,
+              help="Comma-separated: wav,mp3")
+@click.option("--seed", type=int, default=None)
+@click.option("--out-dir", "out_dir", type=click.Path(), default=".", show_default=True)
+@click.option("--sample-rate", default=44_100, show_default=True)
+@click.option("--bit-depth", default=8, show_default=True,
+              help="Quantization depth for the final chip-style master")
+@click.option("--chip-rate", default=11_025, show_default=True,
+              help="Sample-hold rate for the final chip-style master")
+def cover_chiptune(
+    input_file: str,
+    use_stems: bool,
+    duration: Optional[float],
+    output: str,
+    seed: Optional[int],
+    out_dir: str,
+    sample_rate: int,
+    bit_depth: int,
+    chip_rate: int,
+) -> None:
+    """Create an 8-bit chiptune cover from an existing song."""
+    from .core.chiptune import generate_chiptune_cover
+    from .render.export import export_audio
+
+    input_path = Path(input_file)
+    if duration is not None and duration <= 0:
+        click.echo("Error: --duration must be greater than 0", err=True)
+        sys.exit(1)
+
+    try:
+        formats = _parse_audio_formats(output, allowed={"wav", "mp3"})
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Chiptune cover pipeline: {input_path.name}")
+    analysis_path = input_path
+    melody_path = input_path
+    stem_tmp_paths: list[Path] = []
+
+    if use_stems:
+        click.echo("  Demucs stem separation...")
+        from .stems.separator import separate_stems
+
+        stems = separate_stems(input_path)
+        if stems:
+            click.echo(f"  Stems ready: {', '.join(stems.available_stems)}")
+            analysis_audio = _mix_stem_audio(stems.other, stems.bass)
+            if analysis_audio is not None:
+                analysis_path = _write_temp_audio(analysis_audio, stems.sr, "_chip_analysis.wav")
+                stem_tmp_paths.append(analysis_path)
+
+            melody_audio = stems.vocals if stems.vocals is not None else stems.other
+            if melody_audio is not None:
+                melody_path = _write_temp_audio(melody_audio, stems.sr, "_chip_melody.wav")
+                stem_tmp_paths.append(melody_path)
+        else:
+            click.echo("  Demucs unavailable or failed; continuing with full-mix analysis")
+            click.echo(f"  Install stems: {_optional_dependency_install_hint('stems')}")
+
+    try:
+        click.echo("  Tempo/key/chroma/melody analysis...")
+        result = generate_chiptune_cover(
+            analysis_path,
+            melody_path=melody_path,
+            duration_seconds=duration,
+            seed=seed,
+            sample_rate=sample_rate,
+            bit_depth=bit_depth,
+            chip_rate=chip_rate,
+        )
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    finally:
+        for path in stem_tmp_paths:
+            path.unlink(missing_ok=True)
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    stem_name = f"{input_path.stem}_chiptune"
+
+    click.echo(
+        f"  Key: {result.key}  BPM: {result.bpm:.1f}  "
+        f"Duration: {result.rendered_duration_seconds:.1f}s"
+    )
+    click.echo(
+        f"  Melody notes: {result.melody_note_count}  "
+        f"Chords: {', '.join(chord.name for chord in result.chord_events[:8])}"
+    )
+    click.echo("  Rendering + mastering...")
+    for fmt, path in export_audio(result.audio, result.sample_rate, out_path / stem_name, formats=formats).items():
+        click.echo(f"  {fmt.upper():<5} → {path}")
+
+
 def _mix_stem_audio(*stems):
     import numpy as np
 

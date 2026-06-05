@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from .analysis.melody_extractor import extract_melody
 from .analysis.song_analyzer import analyze_song
 from .ai.musicgen import MusicGenSmallBackend
+from .core.chiptune import generate_chiptune_cover
 from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
 from .core.lofi_arranger import build_cover_context, cover_effects_from_context, from_preset
 from .presets.loader import list_presets, load_preset
@@ -191,7 +192,56 @@ async def remake_lofi(
         return _render_and_respond(midi, effects_cfg, "lofi_remake", formats)
 
 
+@app.post("/cover/chiptune")
+async def cover_chiptune(
+    file: UploadFile = File(...),
+    duration_seconds: Optional[float] = Query(None),
+    seed: Optional[int] = Query(None),
+    output: str = Query("mp3"),
+    sample_rate: int = Query(44_100),
+    bit_depth: int = Query(8),
+    chip_rate: int = Query(11_025),
+):
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise HTTPException(400, "duration_seconds must be positive")
+    formats = _parse_response_formats(output, allowed={"wav", "mp3"})
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filename = file.filename or "upload.mp3"
+        input_path = Path(tmpdir) / filename
+        input_path.write_bytes(await file.read())
+
+        try:
+            result = await run_in_threadpool(
+                generate_chiptune_cover,
+                input_path,
+                duration_seconds=duration_seconds,
+                seed=seed,
+                sample_rate=sample_rate,
+                bit_depth=bit_depth,
+                chip_rate=chip_rate,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        return _render_audio_and_respond(result.audio, result.sample_rate, "chiptune_cover", formats)
+
+
 # ------------------------------------------------------------------ #
+
+def _parse_response_formats(output: str, allowed: set[str]) -> list[str]:
+    formats = list(dict.fromkeys(f.strip().lower() for f in output.split(",") if f.strip()))
+    if not formats:
+        raise HTTPException(400, "output must include at least one format")
+
+    unsupported = [fmt for fmt in formats if fmt not in allowed]
+    if unsupported:
+        raise HTTPException(
+            400,
+            f"unsupported output format(s): {','.join(unsupported)}. Expected: {','.join(sorted(allowed))}",
+        )
+
+    return formats
 
 def _render_and_respond(midi, effects_cfg, stem_name: str, formats: list[str]) -> Response:
     with tempfile.TemporaryDirectory() as tmpdir:
