@@ -62,8 +62,8 @@ if [[ -z "$songgen" || ! -x "$songgen" ]]; then
 fi
 
 run_hours="${RUN_HOURS:-24}"
-track_duration="${TRACK_DURATION:-180}"
-segment_duration="${SEGMENT_DURATION:-30}"
+track_duration="${TRACK_DURATION:-270}"
+segment_duration="${SEGMENT_DURATION:-120}"
 crossfade="${CROSSFADE:-2}"
 random_presets="${RANDOM_PRESETS:-1}"
 preset="${PRESET:-sleepy_piano}"
