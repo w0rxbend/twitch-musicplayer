@@ -5,6 +5,8 @@ from lofi_maker.core.chiptune import (
     ChiptuneChord,
     ChiptuneNote,
     ChiptunePercussionHit,
+    _chord_boundaries,
+    _fit_melody_notes,
     _infer_chord_from_chroma,
     generate_chiptune_cover,
     synthesize_chiptune_cover,
@@ -79,6 +81,20 @@ def test_chord_inference_uses_template_not_loudest_bin():
     assert root == 0
     assert quality == "major"
     assert confidence > 0.35
+
+
+def test_fit_melody_notes_preserves_chromatic_source_pitch():
+    notes = _fit_melody_notes([(0.0, 0.18, 61)], 120.0, 1.0, "C major")
+
+    assert notes[0].pitch == 61
+
+
+def test_chord_boundaries_use_half_bar_windows():
+    beat_times = np.arange(0.0, 4.0, 0.5, dtype=np.float32)
+
+    boundaries = _chord_boundaries(beat_times, 4.0, fallback_bpm=120.0)
+
+    assert np.allclose(boundaries, np.array([0.0, 1.0, 2.0, 3.0, 4.0], dtype=np.float32))
 
 
 def test_synthesize_chiptune_cover_accepts_detected_bass_and_percussion():

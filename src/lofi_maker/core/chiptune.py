@@ -118,17 +118,21 @@ def generate_chiptune_cover(
     target_duration = max(0.1, target_duration)
 
     context = analyze_song(input_path, duration_seconds=target_duration, seed=seed)
-    bpm = _sanitize_bpm(context.source_bpm or context.bpm)
+    fallback_bpm = _sanitize_bpm(context.source_bpm or context.bpm)
     key = context.key
 
     harmonic, percussive = _split_harmonic_percussive(y)
+    bpm = _estimate_source_bpm(percussive, analysis_sr, fallback_bpm)
     beat_times = _detect_beat_times(percussive, analysis_sr, bpm, target_duration)
     chord_events = _extract_chord_events(harmonic, analysis_sr, target_duration, beat_times, key, bpm)
-    bass_events = _extract_bass_events(harmonic, analysis_sr, target_duration, key, bpm)
+    bass_events = _extract_bass_events(harmonic, analysis_sr, target_duration, bpm)
     percussion_events = _extract_percussion_hits(percussive, analysis_sr, target_duration, beat_times, bpm)
 
     source_notes = list(melody_notes) if melody_notes is not None else extract_melody(melody_source)
     melody_events = _fit_melody_notes(source_notes or [], bpm, target_duration, key)
+    if _melody_is_sparse(melody_events, target_duration):
+        detected_melody = _extract_salient_melody_events(harmonic, analysis_sr, target_duration, bpm, key)
+        melody_events = _combine_melody_events(melody_events, detected_melody, bpm, target_duration)
     if not melody_events:
         melody_events = _fallback_melody_from_chords(chord_events, beat_times, bpm, target_duration, seed)
 
@@ -240,6 +244,61 @@ def _split_harmonic_percussive(y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return y.astype(np.float32), y.astype(np.float32)
 
 
+def _estimate_source_bpm(percussive: np.ndarray, sr: int, fallback_bpm: float) -> float:
+    try:
+        import librosa
+
+        hop_length = 512
+        onset_env = librosa.onset.onset_strength(y=percussive, sr=sr, hop_length=hop_length)
+        tempo_fn = getattr(librosa.feature, "tempo", None) or getattr(librosa.beat, "tempo")
+        tempo_values = tempo_fn(onset_envelope=onset_env, sr=sr, hop_length=hop_length, aggregate=None)
+        candidates = [fallback_bpm]
+        candidates.extend(float(value) for value in np.ravel(tempo_values) if np.isfinite(value))
+    except Exception:
+        return _sanitize_bpm(fallback_bpm)
+
+    expanded: list[float] = []
+    for candidate in candidates:
+        for multiplier in (0.5, 1.0, 2.0):
+            value = float(candidate) * multiplier
+            if 45.0 <= value <= 220.0:
+                expanded.append(value)
+
+    if not expanded:
+        return _sanitize_bpm(fallback_bpm)
+
+    unique_candidates = sorted(set(round(value, 2) for value in expanded))
+    best = max(
+        unique_candidates,
+        key=lambda value: (
+            _score_bpm_against_onsets(value, onset_env, sr, hop_length),
+            -abs(math.log2(value / fallback_bpm)) if fallback_bpm > 0 else 0.0,
+        ),
+    )
+    return _sanitize_bpm(best)
+
+
+def _score_bpm_against_onsets(bpm: float, onset_env: np.ndarray, sr: int, hop_length: int) -> float:
+    if onset_env.size == 0 or bpm <= 0:
+        return 0.0
+
+    frames_per_second = sr / hop_length
+    beat_frames = max(1.0, 60.0 / bpm * frames_per_second)
+    normalized = np.asarray(onset_env, dtype=np.float32)
+    peak = float(np.max(normalized)) if normalized.size else 0.0
+    if peak > 1e-6:
+        normalized = normalized / peak
+
+    best = 0.0
+    for offset in np.linspace(0.0, beat_frames, num=8, endpoint=False):
+        starts = np.arange(offset, len(onset_env), beat_frames)
+        if starts.size == 0:
+            continue
+        indices = np.clip(np.round(starts).astype(int), 0, len(onset_env) - 1)
+        best = max(best, float(np.mean(normalized[indices])))
+    return best
+
+
 def _detect_beat_times(
     percussive: np.ndarray,
     sr: int,
@@ -283,7 +342,7 @@ def _extract_chord_events(
 
     root_from_key = _root_pc_from_key(key)
     mode = "minor" if _key_is_minor(key) else "major"
-    bars = _bar_boundaries(beat_times, duration_seconds, fallback_bpm=bpm)
+    boundaries = _chord_boundaries(beat_times, duration_seconds, fallback_bpm=bpm)
 
     try:
         chroma = librosa.feature.chroma_cqt(y=harmonic, sr=sr, hop_length=512)
@@ -294,7 +353,7 @@ def _extract_chord_events(
         times = np.zeros(0, dtype=np.float32)
 
     events: list[ChiptuneChord] = []
-    for start, end in zip(bars[:-1], bars[1:]):
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
         if end <= start:
             continue
 
@@ -325,7 +384,7 @@ def _fit_melody_notes(
     key: str,
 ) -> list[ChiptuneNote]:
     beat = 60.0 / _sanitize_bpm(bpm)
-    grid = beat / 4.0
+    grid = beat / 8.0
     fitted_by_slot: dict[int, ChiptuneNote] = {}
 
     for raw_start, raw_end, raw_pitch in notes:
@@ -337,26 +396,153 @@ def _fit_melody_notes(
         q_start = round(start / grid) * grid
         q_end = round(end / grid) * grid
         q_start = max(0.0, min(duration_seconds, q_start))
-        q_end = min(duration_seconds, max(q_start + grid * 0.8, q_end))
+        q_end = min(duration_seconds, max(q_start + grid * 0.6, q_end))
         if q_end <= q_start:
             continue
 
-        pitch = _fold_pitch(int(round(raw_pitch)), low=60, high=84)
-        pitch = _snap_pitch_to_key(pitch, key)
+        pitch = _fold_pitch(int(round(raw_pitch)), low=55, high=96)
         note = ChiptuneNote(q_start, q_end, pitch, velocity=1.0)
         slot = int(round(q_start / grid))
         previous = fitted_by_slot.get(slot)
-        if previous is None or (note.end - note.start) > (previous.end - previous.start):
+        if previous is None or _melody_note_priority(note) > _melody_note_priority(previous):
             fitted_by_slot[slot] = note
 
-    return _merge_melody_notes(sorted(fitted_by_slot.values(), key=lambda item: (item.start, item.pitch)), grid)
+    return _merge_melody_notes(sorted(fitted_by_slot.values(), key=lambda item: (item.start, item.pitch)), grid * 0.5)
+
+
+def _extract_salient_melody_events(
+    harmonic: np.ndarray,
+    sr: int,
+    duration_seconds: float,
+    bpm: float,
+    key: str,
+) -> list[ChiptuneNote]:
+    try:
+        import librosa
+
+        hop_length = 256
+        pitches, magnitudes = librosa.piptrack(
+            y=harmonic,
+            sr=sr,
+            hop_length=hop_length,
+            fmin=librosa.note_to_hz("G2"),
+            fmax=librosa.note_to_hz("C7"),
+            threshold=0.05,
+        )
+        times = librosa.times_like(magnitudes, sr=sr, hop_length=hop_length)
+    except Exception:
+        return []
+
+    if magnitudes.size == 0 or pitches.size == 0:
+        return []
+
+    frame_strengths = np.max(magnitudes, axis=0)
+    nonzero = frame_strengths[frame_strengths > 0.0]
+    if nonzero.size == 0:
+        return []
+
+    strength_floor = max(float(np.percentile(nonzero, 45)) * 0.55, float(np.max(nonzero)) * 0.035)
+    raw_notes: list[tuple[float, float, int]] = []
+    current_start: float | None = None
+    current_pitch: int | None = None
+    frame_step = float(times[1] - times[0]) if len(times) > 1 else 0.03
+
+    for frame_index, time in enumerate(times):
+        if float(time) >= duration_seconds:
+            break
+
+        column = magnitudes[:, frame_index]
+        peak_index = int(np.argmax(column))
+        strength = float(column[peak_index])
+        freq = float(pitches[peak_index, frame_index])
+        pitch = None
+        if strength >= strength_floor and np.isfinite(freq) and freq > 0.0:
+            pitch = _fold_pitch(int(round(_hz_to_midi(freq))), low=55, high=96)
+
+        if pitch is None:
+            if current_start is not None and current_pitch is not None:
+                _append_raw_note(raw_notes, current_start, float(time), current_pitch, min_duration=0.045)
+            current_start = None
+            current_pitch = None
+            continue
+
+        if current_pitch is None:
+            current_start = float(time)
+            current_pitch = pitch
+        elif abs(pitch - current_pitch) <= 1:
+            current_pitch = int(round((current_pitch + pitch) / 2))
+        else:
+            _append_raw_note(raw_notes, current_start or 0.0, float(time), current_pitch, min_duration=0.045)
+            current_start = float(time)
+            current_pitch = pitch
+
+    if current_start is not None and current_pitch is not None:
+        end = min(duration_seconds, float(times[-1] + frame_step) if len(times) else duration_seconds)
+        _append_raw_note(raw_notes, current_start, end, current_pitch, min_duration=0.045)
+
+    fitted = _fit_melody_notes(raw_notes, bpm, duration_seconds, key)
+    return _limit_event_density(fitted, max_events_per_second=14.0, duration_seconds=duration_seconds)
+
+
+def _append_raw_note(
+    notes: list[tuple[float, float, int]],
+    start: float,
+    end: float,
+    pitch: int,
+    *,
+    min_duration: float,
+) -> None:
+    if end - start >= min_duration:
+        notes.append((start, max(end, start + min_duration), pitch))
+
+
+def _melody_is_sparse(notes: list[ChiptuneNote], duration_seconds: float) -> bool:
+    if not notes:
+        return True
+    expected = max(4, int(duration_seconds * 1.4))
+    covered = sum(max(0.0, min(note.end, duration_seconds) - max(0.0, note.start)) for note in notes)
+    return len(notes) < expected or covered < duration_seconds * 0.18
+
+
+def _combine_melody_events(
+    primary: list[ChiptuneNote],
+    supplemental: list[ChiptuneNote],
+    bpm: float,
+    duration_seconds: float,
+) -> list[ChiptuneNote]:
+    if not supplemental:
+        return primary
+    if not primary:
+        return supplemental
+
+    beat = 60.0 / _sanitize_bpm(bpm)
+    tolerance = beat / 8.0
+    combined = list(primary)
+    for note in supplemental:
+        if note.start >= duration_seconds:
+            continue
+        if any(_notes_overlap(note, existing, tolerance=tolerance) for existing in combined):
+            continue
+        combined.append(note)
+
+    combined.sort(key=lambda item: (item.start, -item.pitch))
+    return _limit_event_density(combined, max_events_per_second=14.0, duration_seconds=duration_seconds)
+
+
+def _notes_overlap(a: ChiptuneNote, b: ChiptuneNote, *, tolerance: float) -> bool:
+    return a.start < b.end + tolerance and b.start < a.end + tolerance
+
+
+def _melody_note_priority(note: ChiptuneNote) -> float:
+    duration = max(0.0, note.end - note.start)
+    pitch_weight = (note.pitch - 55) / 41.0
+    return duration * 0.68 + note.velocity * 0.18 + pitch_weight * 0.14
 
 
 def _extract_bass_events(
     harmonic: np.ndarray,
     sr: int,
     duration_seconds: float,
-    key: str,
     bpm: float,
 ) -> list[ChiptuneNote]:
     try:
@@ -383,7 +569,7 @@ def _extract_bass_events(
         return []
 
     beat = 60.0 / _sanitize_bpm(bpm)
-    grid = beat / 4.0
+    grid = beat / 8.0
     notes: list[ChiptuneNote] = []
     current_start: float | None = None
     current_pitch: int | None = None
@@ -395,11 +581,8 @@ def _extract_bass_events(
             break
 
         pitch = None
-        if voiced and np.isfinite(freq) and probability >= 0.22:
-            pitch = _snap_pitch_to_key(
-                _fold_pitch(int(round(_hz_to_midi(float(freq)))), low=36, high=55),
-                key,
-            )
+        if voiced and np.isfinite(freq) and probability >= 0.12:
+            pitch = _fold_pitch(int(round(_hz_to_midi(float(freq)))), low=36, high=55)
 
         if pitch is None:
             if current_start is not None and current_pitch is not None:
@@ -445,7 +628,7 @@ def _extract_bass_events(
 
     return _limit_event_density(
         _merge_melody_notes(notes, max_gap=grid * 0.75),
-        max_events_per_second=8.0,
+        max_events_per_second=12.0,
         duration_seconds=duration_seconds,
     )
 
@@ -496,8 +679,8 @@ def _extract_percussion_hits(
             hop_length=hop_length,
             units="time",
             backtrack=True,
-            delta=0.04,
-            wait=1,
+            delta=0.02,
+            wait=0,
         )
     except Exception:
         return []
@@ -506,7 +689,7 @@ def _extract_percussion_hits(
         return []
 
     strengths = np.asarray(onset_env, dtype=np.float32)
-    strength_floor = float(np.percentile(strengths, 55)) if strengths.size else 0.0
+    strength_floor = float(np.percentile(strengths, 42)) if strengths.size else 0.0
     strength_peak = float(np.percentile(strengths, 96)) if strengths.size else 1.0
     scale = max(1e-6, strength_peak - strength_floor)
     beat = 60.0 / _sanitize_bpm(bpm)
@@ -984,16 +1167,16 @@ def _fade_edges(audio: np.ndarray, sr: int, fade_seconds: float = 0.025) -> np.n
     return shaped
 
 
-def _bar_boundaries(beat_times: np.ndarray, duration_seconds: float, fallback_bpm: float) -> np.ndarray:
+def _chord_boundaries(beat_times: np.ndarray, duration_seconds: float, fallback_bpm: float) -> np.ndarray:
     if beat_times.size >= 4:
         starts = [0.0]
-        starts.extend(float(beat_times[i]) for i in range(0, len(beat_times), 4) if beat_times[i] > 0.02)
+        starts.extend(float(beat_times[i]) for i in range(0, len(beat_times), 2) if beat_times[i] > 0.02)
         starts.append(duration_seconds)
         return np.unique(np.clip(np.asarray(starts, dtype=np.float32), 0.0, duration_seconds))
 
     beat = 60.0 / _sanitize_bpm(fallback_bpm)
-    bar = beat * 4.0
-    return np.arange(0.0, duration_seconds + bar, bar, dtype=np.float32).clip(max=duration_seconds)
+    half_bar = beat * 2.0
+    return np.arange(0.0, duration_seconds + half_bar, half_bar, dtype=np.float32).clip(max=duration_seconds)
 
 
 def _regular_beat_grid(duration_seconds: float, beat_period: float) -> np.ndarray:
@@ -1079,7 +1262,7 @@ def _limit_event_density(
 def _limit_percussion_density(
     hits: list[ChiptunePercussionHit],
     duration_seconds: float,
-    max_hits_per_second: float = 12.0,
+    max_hits_per_second: float = 18.0,
 ) -> list[ChiptunePercussionHit]:
     if duration_seconds <= 0.0:
         return hits

@@ -918,6 +918,8 @@ def cover_chiptune(
     )
     click.echo(
         f"  Melody notes: {result.melody_note_count}  "
+        f"Bass notes: {result.bass_note_count}  "
+        f"Percussion hits: {result.percussion_hit_count}  "
         f"Chords: {', '.join(chord.name for chord in result.chord_events[:8])}"
     )
     click.echo("  Rendering + mastering...")
