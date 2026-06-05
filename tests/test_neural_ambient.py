@@ -12,8 +12,15 @@ from lofi_maker.ai.musicgen import (
     validate_openvino_transformers_version,
 )
 from lofi_maker.ai.segment_backend import GeneratedAudio, SegmentRequest
-from lofi_maker.core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+from lofi_maker.core.neural_ambient import (
+    build_ambient_prompt,
+    generate_lofi_ambient_audio,
+    get_slowed_reverb_preset,
+    list_slowed_reverb_presets,
+    slowed_reverb_source_duration,
+)
 from lofi_maker.presets.loader import load_preset
+from lofi_maker.render.effects import apply_slowed_reverb_effects
 
 
 class FakeAudioBackend:
@@ -121,6 +128,66 @@ def test_build_ambient_prompt_uses_preset_context():
     assert "slow ambient lofi instrumental" in prompt
     assert preset.mood in prompt
     assert "loopable" in prompt
+
+
+def test_slowed_reverb_presets_include_named_effects():
+    presets = {preset.name: preset for preset in list_slowed_reverb_presets()}
+
+    assert set(presets) == {
+        "fading",
+        "in_the_distance",
+        "moving_apart",
+        "my_last_day_on_earth",
+        "nothing_matters",
+        "roadtrips",
+        "something_else",
+        "the_hardest_part",
+    }
+    assert get_slowed_reverb_preset("in the distance").name == "in_the_distance"
+    assert get_slowed_reverb_preset("fading (slowed + reverb)").name == "fading"
+
+
+def test_build_ambient_prompt_adds_slowed_reverb_context():
+    preset = load_preset("slow_orbit")
+    slowed = get_slowed_reverb_preset("nothing_matters")
+
+    prompt = build_ambient_prompt(preset, None, slowed)
+
+    assert "slowed down" in prompt
+    assert "drenched in long reverb" in prompt
+    assert slowed.prompt in prompt
+    assert "no sampled vocals" in prompt
+
+
+def test_slowed_reverb_source_duration_accounts_for_playback_rate():
+    slowed = get_slowed_reverb_preset("the_hardest_part")
+
+    assert slowed_reverb_source_duration(100.0, None) == 100.0
+    assert slowed_reverb_source_duration(100.0, slowed) == pytest.approx(79.0)
+
+
+def test_apply_slowed_reverb_effects_fits_target_duration():
+    sr = 1000
+    audio = np.linspace(-0.2, 0.2, sr, dtype=np.float32)
+    slowed = get_slowed_reverb_preset("roadtrips")
+
+    processed = apply_slowed_reverb_effects(
+        audio,
+        sr,
+        playback_rate=slowed.playback_rate,
+        reverb=slowed.reverb,
+        wet_level=slowed.wet_level,
+        lowpass_hz=slowed.lowpass_hz,
+        fade_seconds=0.05,
+        tail_seconds=0.1,
+        distance=slowed.distance,
+        gain=slowed.gain,
+        target_duration_seconds=1.5,
+    )
+
+    assert processed.shape == (1500,)
+    assert processed.dtype == np.float32
+    assert np.isfinite(processed).all()
 
 
 def test_generate_lofi_ambient_audio_splits_and_fits_duration():

@@ -13,10 +13,16 @@ from .analysis.melody_extractor import extract_melody
 from .analysis.song_analyzer import analyze_song
 from .ai.musicgen import MusicGenSmallBackend
 from .core.chiptune import generate_chiptune_cover
-from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+from .core.neural_ambient import (
+    build_ambient_prompt,
+    generate_lofi_ambient_audio,
+    get_slowed_reverb_preset,
+    random_slowed_reverb_preset,
+    slowed_reverb_source_duration,
+)
 from .core.lofi_arranger import build_cover_context, cover_effects_from_context, from_preset
 from .presets.loader import list_presets, load_preset
-from .render.effects import apply_lofi_effects
+from .render.effects import apply_lofi_effects, apply_slowed_reverb_effects
 from .render.export import export_audio
 from .render.soundfont import find_soundfont, midi_to_wav
 
@@ -78,6 +84,7 @@ class GeneratePresetRequest(BaseModel):
 class GenerateAmbientRequest(BaseModel):
     prompt: Optional[str] = None
     preset: str = "ambient_lofi"
+    slowed_reverb_preset: Optional[str] = None
     duration_seconds: float = 12.0
     segment_seconds: float = 12.0
     crossfade_seconds: float = 1.0
@@ -128,6 +135,11 @@ async def generate_ambient(req: GenerateAmbientRequest):
     except FileNotFoundError:
         raise HTTPException(404, f"Preset '{req.preset}' not found")
 
+    try:
+        slowed_reverb = _resolve_api_slowed_reverb_preset(req.slowed_reverb_preset)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
     backend = _get_audio_backend(
         runtime=req.runtime,
         model_id=req.model_id,
@@ -139,14 +151,15 @@ async def generate_ambient(req: GenerateAmbientRequest):
     if not backend.available:
         raise HTTPException(503, "MusicGen dependencies are not installed")
 
-    prompt = build_ambient_prompt(preset, req.prompt)
+    prompt = build_ambient_prompt(preset, req.prompt, slowed_reverb)
+    source_duration = slowed_reverb_source_duration(req.duration_seconds, slowed_reverb)
 
     try:
         result = await run_in_threadpool(
             generate_lofi_ambient_audio,
             backend,
             prompt,
-            req.duration_seconds,
+            source_duration,
             req.seed,
             req.segment_seconds,
             req.crossfade_seconds,
@@ -160,6 +173,20 @@ async def generate_ambient(req: GenerateAmbientRequest):
         raise HTTPException(400, str(exc)) from exc
 
     audio = apply_lofi_effects(result.audio, result.sample_rate, preset.effects)
+    if slowed_reverb is not None:
+        audio = apply_slowed_reverb_effects(
+            audio,
+            result.sample_rate,
+            playback_rate=slowed_reverb.playback_rate,
+            reverb=slowed_reverb.reverb,
+            wet_level=slowed_reverb.wet_level,
+            lowpass_hz=slowed_reverb.lowpass_hz,
+            fade_seconds=slowed_reverb.fade_seconds,
+            tail_seconds=slowed_reverb.tail_seconds,
+            distance=slowed_reverb.distance,
+            gain=slowed_reverb.gain,
+            target_duration_seconds=req.duration_seconds,
+        )
     return _render_audio_and_respond(audio, result.sample_rate, "musicgen_ambient", req.output)
 
 
@@ -228,6 +255,14 @@ async def cover_chiptune(
 
 
 # ------------------------------------------------------------------ #
+
+def _resolve_api_slowed_reverb_preset(value: Optional[str]):
+    if not value:
+        return None
+    if value.strip().lower() == "random":
+        return random_slowed_reverb_preset()
+    return get_slowed_reverb_preset(value)
+
 
 def _parse_response_formats(output: str, allowed: set[str]) -> list[str]:
     formats = list(dict.fromkeys(f.strip().lower() for f in output.split(",") if f.strip()))

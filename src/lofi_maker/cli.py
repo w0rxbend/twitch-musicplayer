@@ -44,6 +44,20 @@ def presets() -> None:
     click.echo()
 
 
+@cli.command("slowed-reverb-presets")
+def slowed_reverb_presets() -> None:
+    """List available slowed + reverb ambient effect presets."""
+    from .core.neural_ambient import list_slowed_reverb_presets
+
+    click.echo("\nAvailable slowed + reverb presets:\n")
+    for preset in list_slowed_reverb_presets():
+        click.echo(
+            f"  {preset.name:<24} {preset.playback_rate:.2f}x  "
+            f"reverb={preset.reverb:.2f}  {preset.title}"
+        )
+    click.echo()
+
+
 # ------------------------------------------------------------------ #
 # songgen generate-preset
 # ------------------------------------------------------------------ #
@@ -138,6 +152,8 @@ def generate_random(
 @click.option("--prompt", default=None, help="Text prompt for MusicGen")
 @click.option("--preset", default="ambient_lofi", show_default=True,
               help="Preset used for prompt color and lofi effects")
+@click.option("--slowed-reverb-preset", default=None,
+              help="Apply a named slowed + reverb preset, or 'random'")
 @click.option("--duration", default=12.0, show_default=True,
               help="Final duration in seconds. MusicGen is chunked above 30s.")
 @click.option("--segment-duration", default=12.0, show_default=True,
@@ -162,6 +178,7 @@ def generate_random(
 def generate_ambient(
     prompt: Optional[str],
     preset: str,
+    slowed_reverb_preset: Optional[str],
     duration: float,
     segment_duration: float,
     crossfade: float,
@@ -179,14 +196,24 @@ def generate_ambient(
 ) -> None:
     """Generate lofi ambient audio with facebook/musicgen-small."""
     from .ai.musicgen import MusicGenSmallBackend
-    from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+    from .core.neural_ambient import (
+        build_ambient_prompt,
+        generate_lofi_ambient_audio,
+        slowed_reverb_source_duration,
+    )
     from .presets.loader import load_preset
-    from .render.effects import apply_lofi_effects
+    from .render.effects import apply_lofi_effects, apply_slowed_reverb_effects
     from .render.export import export_audio
 
     try:
         preset_cfg = load_preset(preset)
     except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        slow_reverb_cfg = _resolve_slowed_reverb_preset(slowed_reverb_preset)
+    except ValueError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -205,7 +232,8 @@ def generate_ambient(
             click.echo(f"Install OpenVINO support: {_optional_dependency_install_hint('musicgen-openvino')}", err=True)
         sys.exit(1)
 
-    final_prompt = build_ambient_prompt(preset_cfg, prompt)
+    final_prompt = build_ambient_prompt(preset_cfg, prompt, slow_reverb_cfg)
+    source_duration = slowed_reverb_source_duration(duration, slow_reverb_cfg)
     try:
         formats = _parse_audio_formats(output, allowed={"wav", "mp3"})
     except ValueError as exc:
@@ -214,13 +242,18 @@ def generate_ambient(
 
     click.echo(f"Generating lofi ambient audio with {model} ({runtime})")
     click.echo(f"  Duration: {duration:.1f}s  Segment: {min(segment_duration, 30.0):.1f}s")
+    if slow_reverb_cfg is not None:
+        click.echo(
+            f"  Slowed + reverb: {slow_reverb_cfg.title}  "
+            f"source={source_duration:.1f}s playback={slow_reverb_cfg.playback_rate:.2f}x"
+        )
     click.echo(f"  Prompt: {final_prompt}")
 
     try:
         result = generate_lofi_ambient_audio(
             backend=backend,
             prompt=final_prompt,
-            duration_seconds=duration,
+            duration_seconds=source_duration,
             seed=seed,
             segment_seconds=segment_duration,
             crossfade_seconds=crossfade,
@@ -233,10 +266,25 @@ def generate_ambient(
         sys.exit(1)
 
     audio = apply_lofi_effects(result.audio, result.sample_rate, preset_cfg.effects)
+    if slow_reverb_cfg is not None:
+        audio = apply_slowed_reverb_effects(
+            audio,
+            result.sample_rate,
+            playback_rate=slow_reverb_cfg.playback_rate,
+            reverb=slow_reverb_cfg.reverb,
+            wet_level=slow_reverb_cfg.wet_level,
+            lowpass_hz=slow_reverb_cfg.lowpass_hz,
+            fade_seconds=slow_reverb_cfg.fade_seconds,
+            tail_seconds=slow_reverb_cfg.tail_seconds,
+            distance=slow_reverb_cfg.distance,
+            gain=slow_reverb_cfg.gain,
+            target_duration_seconds=duration,
+        )
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     suffix = f"seed_{seed}" if seed is not None else str(int(time.time()))
-    output_name = f"{preset}_musicgen_{suffix}"
+    effect_suffix = f"_{slow_reverb_cfg.name}" if slow_reverb_cfg is not None else ""
+    output_name = f"{preset}{effect_suffix}_musicgen_{suffix}"
     for fmt, path in export_audio(audio, result.sample_rate, out_path / output_name, formats=formats).items():
         click.echo(f"  {fmt.upper():<5} → {path}")
     click.echo(f"  Segments: {result.segment_count}")
@@ -252,6 +300,10 @@ def generate_ambient(
               help="Preset used for prompt color and lofi effects")
 @click.option("--random-presets", is_flag=True, default=False,
               help="Randomly choose from all available lofi presets for each track")
+@click.option("--slowed-reverb-preset", default=None,
+              help="Apply a named slowed + reverb preset for every track, or 'random'")
+@click.option("--random-slowed-reverb-presets", is_flag=True, default=False,
+              help="Randomly choose from slowed + reverb effect presets for each track")
 @click.option("--run-hours", default=24.0, show_default=True,
               help="How long the supervised run should keep generating")
 @click.option("--max-tracks", type=int, default=None,
@@ -289,6 +341,8 @@ def generate_ambient_batch(
     prompt: Optional[str],
     preset: str,
     random_presets: bool,
+    slowed_reverb_preset: Optional[str],
+    random_slowed_reverb_presets: bool,
     run_hours: float,
     max_tracks: Optional[int],
     duration: float,
@@ -311,9 +365,13 @@ def generate_ambient_batch(
 ) -> None:
     """Generate lofi ambient tracks continuously for a supervised run."""
     from .ai.musicgen import MusicGenSmallBackend
-    from .core.neural_ambient import build_ambient_prompt, generate_lofi_ambient_audio
+    from .core.neural_ambient import (
+        build_ambient_prompt,
+        generate_lofi_ambient_audio,
+        slowed_reverb_source_duration,
+    )
     from .presets.loader import list_presets, load_preset
-    from .render.effects import apply_lofi_effects
+    from .render.effects import apply_lofi_effects, apply_slowed_reverb_effects
     from .render.export import export_audio
 
     if run_hours <= 0:
@@ -349,6 +407,15 @@ def generate_ambient_batch(
         sys.exit(1)
 
     try:
+        slowed_reverb_choices = _resolve_slowed_reverb_preset_choices(
+            slowed_reverb_preset,
+            random_slowed_reverb_presets,
+        )
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
         formats = _parse_audio_formats(output, allowed={"wav", "mp3"})
     except ValueError as exc:
         click.echo(f"Error: {exc}", err=True)
@@ -357,7 +424,8 @@ def generate_ambient_batch(
     started_at = datetime.now()
     out_path = Path(out_dir) if out_dir else Path("output") / f"ambient_batch_{started_at:%Y%m%d_%H%M%S}"
     manifest_path = Path(manifest) if manifest else out_path / "ambient_batch_manifest.jsonl"
-    first_prompt = build_ambient_prompt(preset_choices[0][1], prompt)
+    first_slowed_reverb = slowed_reverb_choices[0] if slowed_reverb_choices else None
+    first_prompt = build_ambient_prompt(preset_choices[0][1], prompt, first_slowed_reverb)
     deadline = time.monotonic() + run_hours * 3600.0
 
     click.echo("Ambient batch generation plan")
@@ -372,6 +440,15 @@ def generate_ambient_batch(
         click.echo(f"  Presets: random from {len(preset_choices)} available lofi presets")
     else:
         click.echo(f"  Preset: {preset_choices[0][0]}")
+    if len(slowed_reverb_choices) > 1:
+        click.echo(f"  Slowed + reverb: random from {len(slowed_reverb_choices)} effect presets")
+    elif first_slowed_reverb is not None:
+        click.echo(
+            f"  Slowed + reverb: {first_slowed_reverb.title}  "
+            f"playback={first_slowed_reverb.playback_rate:.2f}x"
+        )
+    else:
+        click.echo("  Slowed + reverb: off")
     click.echo(f"  Output: {','.join(formats)}")
     click.echo(f"  Out dir: {out_path}")
     click.echo(f"  Manifest: {manifest_path}")
@@ -403,6 +480,9 @@ def generate_ambient_batch(
             "preset": None if random_presets else preset_choices[0][0],
             "preset_count": len(preset_choices),
             "presets": [name for name, _ in preset_choices],
+            "random_slowed_reverb_presets": len(slowed_reverb_choices) > 1,
+            "slowed_reverb_preset": None if len(slowed_reverb_choices) != 1 or first_slowed_reverb is None else first_slowed_reverb.name,
+            "slowed_reverb_presets": [preset.name for preset in slowed_reverb_choices],
         },
     )
 
@@ -433,17 +513,24 @@ def generate_ambient_batch(
             attempt += 1
             seed = secrets.randbelow(2_147_483_647)
             track_preset, track_preset_cfg = secrets.choice(preset_choices)
-            track_prompt = build_ambient_prompt(track_preset_cfg, prompt)
-            output_name = f"{track_preset}_musicgen_{attempt:04d}_seed_{seed}"
+            track_slowed_reverb = secrets.choice(slowed_reverb_choices) if slowed_reverb_choices else None
+            track_prompt = build_ambient_prompt(track_preset_cfg, prompt, track_slowed_reverb)
+            source_duration = slowed_reverb_source_duration(duration, track_slowed_reverb)
+            effect_suffix = f"_{track_slowed_reverb.name}" if track_slowed_reverb is not None else ""
+            output_name = f"{track_preset}{effect_suffix}_musicgen_{attempt:04d}_seed_{seed}"
             track_started = time.monotonic()
             click.echo()
-            click.echo(f"[{_local_now_label()}] Track attempt {attempt} preset={track_preset} (seed={seed})")
+            effect_label = track_slowed_reverb.name if track_slowed_reverb is not None else "none"
+            click.echo(
+                f"[{_local_now_label()}] Track attempt {attempt} "
+                f"preset={track_preset} slowed_reverb={effect_label} (seed={seed})"
+            )
 
             try:
                 result = generate_lofi_ambient_audio(
                     backend=backend,
                     prompt=track_prompt,
-                    duration_seconds=duration,
+                    duration_seconds=source_duration,
                     seed=seed,
                     segment_seconds=segment_duration,
                     crossfade_seconds=crossfade,
@@ -452,13 +539,30 @@ def generate_ambient_batch(
                     top_k=top_k,
                 )
                 audio = apply_lofi_effects(result.audio, result.sample_rate, track_preset_cfg.effects)
+                if track_slowed_reverb is not None:
+                    audio = apply_slowed_reverb_effects(
+                        audio,
+                        result.sample_rate,
+                        playback_rate=track_slowed_reverb.playback_rate,
+                        reverb=track_slowed_reverb.reverb,
+                        wet_level=track_slowed_reverb.wet_level,
+                        lowpass_hz=track_slowed_reverb.lowpass_hz,
+                        fade_seconds=track_slowed_reverb.fade_seconds,
+                        tail_seconds=track_slowed_reverb.tail_seconds,
+                        distance=track_slowed_reverb.distance,
+                        gain=track_slowed_reverb.gain,
+                        target_duration_seconds=duration,
+                    )
                 exported = export_audio(audio, result.sample_rate, out_path / output_name, formats=formats)
                 elapsed = time.monotonic() - track_started
                 ok_count += 1
 
                 for fmt, path in exported.items():
                     click.echo(f"  {fmt.upper():<5} → {path}")
-                click.echo(f"  Done in {elapsed / 60.0:.1f} min  Segments: {result.segment_count}")
+                click.echo(
+                    f"  Done in {elapsed / 60.0:.1f} min  "
+                    f"Source: {source_duration:.1f}s  Segments: {result.segment_count}"
+                )
 
                 _append_jsonl(
                     manifest_path,
@@ -468,10 +572,13 @@ def generate_ambient_batch(
                         "attempt": attempt,
                         "track_index": ok_count,
                         "preset": track_preset,
+                        "slowed_reverb_preset": None if track_slowed_reverb is None else track_slowed_reverb.name,
+                        "slowed_reverb_title": None if track_slowed_reverb is None else track_slowed_reverb.title,
                         "prompt": track_prompt,
                         "seed": seed,
                         "elapsed_seconds": elapsed,
                         "duration_seconds": duration,
+                        "source_duration_seconds": source_duration,
                         "segment_count": result.segment_count,
                         "sample_rate": result.sample_rate,
                         "outputs": {fmt: str(path) for fmt, path in exported.items()},
@@ -491,6 +598,7 @@ def generate_ambient_batch(
                         "failed_at": _utc_now_iso(),
                         "attempt": attempt,
                         "preset": track_preset,
+                        "slowed_reverb_preset": None if track_slowed_reverb is None else track_slowed_reverb.name,
                         "prompt": track_prompt,
                         "seed": seed,
                         "elapsed_seconds": elapsed,
@@ -845,6 +953,30 @@ def _write_temp_audio(audio, sr: int, suffix: str) -> Path:
         path = Path(tmp.name)
     sf.write(str(path), audio, sr)
     return path
+
+
+def _resolve_slowed_reverb_preset(value: Optional[str]):
+    if not value:
+        return None
+
+    from .core.neural_ambient import get_slowed_reverb_preset, random_slowed_reverb_preset
+
+    if value.strip().lower() == "random":
+        return random_slowed_reverb_preset()
+    return get_slowed_reverb_preset(value)
+
+
+def _resolve_slowed_reverb_preset_choices(value: Optional[str], random_choices: bool) -> list:
+    from .core.neural_ambient import get_slowed_reverb_preset, list_slowed_reverb_presets
+
+    if value and random_choices:
+        raise ValueError("Use either --slowed-reverb-preset or --random-slowed-reverb-presets, not both")
+
+    if random_choices or (value and value.strip().lower() == "random"):
+        return list(list_slowed_reverb_presets())
+    if value:
+        return [get_slowed_reverb_preset(value)]
+    return []
 
 
 def _parse_audio_formats(output: str, allowed: set[str]) -> list[str]:

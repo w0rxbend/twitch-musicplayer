@@ -260,13 +260,16 @@ The repository now includes a first MusicGen Small integration for lofi ambient 
 songgen generate-ambient --duration 12 --output mp3
 songgen generate-ambient --prompt "slow dusty ambient lofi pads, felt piano, tape hiss" --duration 30 --output wav,mp3
 songgen generate-ambient --runtime openvino --duration 12 --segment-duration 12
+songgen generate-ambient --preset slow_orbit --slowed-reverb-preset "in the distance" --duration 180 --runtime openvino
+songgen generate-ambient-batch --run-hours 24 --runtime openvino --duration 180 --segment-duration 30 --preset slow_orbit --random-slowed-reverb-presets
 songgen generate-ambient-batch --run-hours 24 --runtime openvino --duration 180 --segment-duration 30 --random-presets
 scripts/run_ambient_generation_24h.sh output/ambient_24h
+scripts/run_slowed_reverb_ambient_generation_24h.sh output/sad_hours_24h
 ```
 
 The default runtime uses Hugging Face Transformers on CPU. The OpenVINO runtime converts and caches `facebook/musicgen-small` IR files under `models/musicgen-small-openvino`, which is intentionally ignored by git because the generated model files are large.
 
-For long unattended runs, use `generate-ambient-batch` or the `scripts/run_ambient_generation_24h.sh` launcher. The batch command keeps one backend process warm, catches per-track failures, writes every result to `ambient_batch_manifest.jsonl`, and stops when the time window or optional `--max-tracks` cap is reached. Add `--random-presets` to pick a different lofi preset for each track. The launcher starts the batch command with `nohup`, enables random presets by default, and writes `generator.log`, `generator.pid`, and the manifest into the output directory.
+For long unattended runs, use `generate-ambient-batch` or the `scripts/run_ambient_generation_24h.sh` launcher. The batch command keeps one backend process warm, catches per-track failures, writes every result to `ambient_batch_manifest.jsonl`, and stops when the time window or optional `--max-tracks` cap is reached. Add `--random-presets` to pick a different lofi preset for each track. Add `--slowed-reverb-preset NAME` or `--random-slowed-reverb-presets` to create slow, pitch-dropped, long-reverb ambient masters using the built-in effect presets: `fading`, `in_the_distance`, `moving_apart`, `my_last_day_on_earth`, `nothing_matters`, `roadtrips`, `something_else`, and `the_hardest_part`. The slowed-reverb launcher starts the same batch command with `nohup`, defaults to the `slow_orbit` base preset, randomizes the slowed-reverb effect preset, and writes `generator.log`, `generator.pid`, and the manifest into the output directory.
 
 ### Phase 1: Working ONNX/OpenVINO Prototype
 
