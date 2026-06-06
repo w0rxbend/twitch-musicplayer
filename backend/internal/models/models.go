@@ -4,12 +4,15 @@ import "time"
 
 // Song represents an MP3 file tracked by the service.
 type Song struct {
-	ID        string    `json:"id"`
-	Filename  string    `json:"filename"`
-	Path      string    `json:"-"`
-	Title     string    `json:"title"`
-	SizeBytes int64     `json:"size_bytes"`
-	AddedAt   time.Time `json:"added_at"`
+	ID           string    `json:"id"`
+	Filename     string    `json:"filename"`
+	Path         string    `json:"-"`
+	Title        string    `json:"title"`
+	Artist       string    `json:"artist"`
+	Album        string    `json:"album"`
+	DurationSecs float64   `json:"duration_secs"`
+	SizeBytes    int64     `json:"size_bytes"`
+	AddedAt      time.Time `json:"added_at"`
 }
 
 // QueueSource indicates whether a queue entry was added automatically or manually.

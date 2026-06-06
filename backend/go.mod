@@ -3,6 +3,8 @@ module lofi-radio-backend
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.4.0
+	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/cors v1.2.2
@@ -12,4 +14,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.45
 )
 
-require golang.org/x/sys v0.4.0 // indirect
+require (
+	golang.org/x/sys v0.4.0 // indirect
+	golang.org/x/text v0.3.8 // indirect
+)

@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -80,6 +82,44 @@ func (h *SongsHandler) StreamContent(w http.ResponseWriter, r *http.Request) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(h.musicDir, path)
 	}
+	path, err = streamPathUnderMusicDir(h.musicDir, path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "song file not found")
+			return
+		}
+		writeError(w, http.StatusForbidden, "song path is outside music directory")
+		return
+	}
 
 	http.ServeFile(w, r, path)
+}
+
+func streamPathUnderMusicDir(musicDir, songPath string) (string, error) {
+	root, err := filepath.Abs(musicDir)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.Abs(songPath)
+	if err != nil {
+		return "", err
+	}
+
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", errors.New("song path outside music directory")
+	}
+	return path, nil
 }

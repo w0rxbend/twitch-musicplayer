@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
+	"lofi-radio-backend/internal/meta"
 	"lofi-radio-backend/internal/models"
 )
 
@@ -24,97 +26,72 @@ type QueueManager interface {
 	AddToQueue(ctx context.Context, songID string, source models.QueueSource) error
 }
 
-// OnNewSong is called after a new song is added, so the WebSocket hub can broadcast.
+// OnNewSong is called after a newly discovered song is registered.
 type OnNewSong func(song *models.Song)
 
-// Watcher monitors a directory for new .mp3 files and registers them in the DB.
+// Watcher monitors a directory tree for new audio files and registers them.
 type Watcher struct {
-	dir       string
-	songRepo  SongRepository
-	queueMgr  QueueManager
-	fsWatcher *fsnotify.Watcher
-	onNewSong OnNewSong
-	logger    *log.Logger
+	dir        string
+	extensions map[string]struct{}
+	songRepo   SongRepository
+	queueMgr   QueueManager
+	fsWatcher  *fsnotify.Watcher
+	onNewSong  OnNewSong
+	logger     *log.Logger
 }
 
-// New creates a new Watcher that monitors dir for new .mp3 files.
-func New(dir string, songRepo SongRepository, queueMgr QueueManager, onNewSong OnNewSong) (*Watcher, error) {
+// New creates a Watcher. extensions is the list of file suffixes to index (e.g. [".mp3"]).
+func New(dir string, extensions []string, songRepo SongRepository, queueMgr QueueManager, onNewSong OnNewSong) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-
 	if err := fsw.Add(dir); err != nil {
 		fsw.Close()
 		return nil, err
 	}
 
+	extSet := make(map[string]struct{}, len(extensions))
+	for _, e := range extensions {
+		extSet[strings.ToLower(e)] = struct{}{}
+	}
+	if len(extSet) == 0 {
+		extSet[".mp3"] = struct{}{}
+	}
+
 	return &Watcher{
-		dir:       dir,
-		songRepo:  songRepo,
-		queueMgr:  queueMgr,
-		fsWatcher: fsw,
-		onNewSong: onNewSong,
-		logger:    log.New(log.Writer(), "[watcher] ", log.LstdFlags),
+		dir:        dir,
+		extensions: extSet,
+		songRepo:   songRepo,
+		queueMgr:   queueMgr,
+		fsWatcher:  fsw,
+		onNewSong:  onNewSong,
+		logger:     log.New(log.Writer(), "[watcher] ", log.LstdFlags),
 	}, nil
 }
 
-// ScanExisting scans the music dir on startup and inserts any .mp3 files not yet in the DB.
-// It does NOT add them to the queue (they are already known songs; queue is managed separately).
+// ScanExisting walks the entire music directory tree and inserts any audio files
+// not yet tracked in the DB. Does NOT add songs to the queue.
 func (w *Watcher) ScanExisting(ctx context.Context) error {
-	entries, err := os.ReadDir(w.dir)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	return filepath.WalkDir(w.dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || ctx.Err() != nil {
+			return err
 		}
-
-		filename := entry.Name()
-		if strings.ToLower(filepath.Ext(filename)) != ".mp3" {
-			continue
+		if d.IsDir() {
+			if path != w.dir {
+				// Watch every subdirectory so we catch new files in nested dirs.
+				_ = w.fsWatcher.Add(path)
+			}
+			return nil
 		}
-
-		fullPath := filepath.Join(w.dir, filename)
-
-		exists, err := w.songRepo.ExistsByPath(ctx, fullPath)
-		if err != nil {
-			w.logger.Printf("error checking existence of %s: %v", fullPath, err)
-			continue
+		if !w.isMusicFile(path) {
+			return nil
 		}
-		if exists {
-			continue
-		}
-
-		info, err := os.Stat(fullPath)
-		if err != nil {
-			w.logger.Printf("error stat-ing %s: %v", fullPath, err)
-			continue
-		}
-
-		song := &models.Song{
-			ID:        uuid.New().String(),
-			Filename:  filename,
-			Path:      fullPath,
-			Title:     strings.TrimSuffix(filename, ".mp3"),
-			SizeBytes: info.Size(),
-			AddedAt:   time.Now(),
-		}
-
-		if err := w.songRepo.Create(ctx, song); err != nil {
-			w.logger.Printf("error creating song record for %s: %v", fullPath, err)
-			continue
-		}
-
-		w.logger.Printf("added existing song: %s", filename)
-	}
-
-	return nil
+		return w.registerFile(ctx, path, false)
+	})
 }
 
-// Start watches the directory for new files. Blocks until ctx is done.
+// Start watches the directory tree for new files. Blocks until ctx is done.
 func (w *Watcher) Start(ctx context.Context) error {
 	defer w.fsWatcher.Close()
 
@@ -124,59 +101,32 @@ func (w *Watcher) Start(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-
 			if !event.Has(fsnotify.Create) {
 				continue
 			}
 
-			filename := filepath.Base(event.Name)
-			if strings.ToLower(filepath.Ext(filename)) != ".mp3" {
-				continue
-			}
-
-			// Small sleep to let the file finish writing before we stat it.
+			// Give the OS a moment to finish writing.
 			time.Sleep(200 * time.Millisecond)
 
-			fullPath := event.Name
-
-			exists, err := w.songRepo.ExistsByPath(ctx, fullPath)
+			info, err := os.Stat(event.Name)
 			if err != nil {
-				w.logger.Printf("error checking existence of %s: %v", fullPath, err)
-				continue
-			}
-			if exists {
 				continue
 			}
 
-			info, err := os.Stat(fullPath)
-			if err != nil {
-				w.logger.Printf("error stat-ing new file %s: %v", fullPath, err)
+			if info.IsDir() {
+				// New subdirectory: watch it and scan for any files already inside.
+				_ = w.fsWatcher.Add(event.Name)
+				_ = w.scanDir(ctx, event.Name, true)
 				continue
 			}
 
-			song := &models.Song{
-				ID:        uuid.New().String(),
-				Filename:  filename,
-				Path:      fullPath,
-				Title:     strings.TrimSuffix(filename, ".mp3"),
-				SizeBytes: info.Size(),
-				AddedAt:   time.Now(),
-			}
-
-			if err := w.songRepo.Create(ctx, song); err != nil {
-				w.logger.Printf("error creating song record for %s: %v", fullPath, err)
+			if !w.isMusicFile(event.Name) {
 				continue
 			}
 
-			if err := w.queueMgr.AddToQueue(ctx, song.ID, models.QueueSourceAuto); err != nil {
-				w.logger.Printf("error adding %s to queue: %v", filename, err)
+			if err := w.registerFile(ctx, event.Name, true); err != nil {
+				w.logger.Printf("register %s: %v", event.Name, err)
 			}
-
-			if w.onNewSong != nil {
-				w.onNewSong(song)
-			}
-
-			w.logger.Printf("detected and queued new song: %s", filename)
 
 		case err, ok := <-w.fsWatcher.Errors:
 			if !ok {
@@ -188,4 +138,76 @@ func (w *Watcher) Start(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// scanDir walks a single directory (non-recursive) and registers music files.
+func (w *Watcher) scanDir(ctx context.Context, dir string, addToQueue bool) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if !w.isMusicFile(path) {
+			continue
+		}
+		if err := w.registerFile(ctx, path, addToQueue); err != nil {
+			w.logger.Printf("register %s: %v", path, err)
+		}
+	}
+	return nil
+}
+
+// registerFile inserts a new song record and optionally queues it.
+func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool) error {
+	exists, err := w.songRepo.ExistsByPath(ctx, path)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	stat, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	m := meta.Extract(path)
+
+	song := &models.Song{
+		ID:           uuid.New().String(),
+		Filename:     filepath.Base(path),
+		Path:         path,
+		Title:        m.Title,
+		Artist:       m.Artist,
+		Album:        m.Album,
+		DurationSecs: m.DurationSecs,
+		SizeBytes:    stat.Size(),
+		AddedAt:      time.Now(),
+	}
+
+	if err := w.songRepo.Create(ctx, song); err != nil {
+		return err
+	}
+	w.logger.Printf("indexed: %s (%.0fs)", song.Title, song.DurationSecs)
+
+	if addToQueue {
+		if err := w.queueMgr.AddToQueue(ctx, song.ID, models.QueueSourceAuto); err != nil {
+			w.logger.Printf("queue %s: %v", song.Filename, err)
+		}
+		if w.onNewSong != nil {
+			w.onNewSong(song)
+		}
+	}
+
+	return nil
+}
+
+func (w *Watcher) isMusicFile(path string) bool {
+	_, ok := w.extensions[strings.ToLower(filepath.Ext(path))]
+	return ok
 }

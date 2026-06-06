@@ -1,0 +1,35 @@
+# Lofi Radio — server configuration
+# Copy to config.local.toml and override values there, or use env vars.
+
+[server]
+port     = 8080
+base_url = "http://localhost:8080"
+
+[database]
+path = "./lofi-radio.db"
+
+[music]
+dir        = "./music"
+extensions = [".mp3", ".MP3"]
+
+[shuffle]
+# strategy: random | weighted_history | round_robin | least_played
+#   random           — pure random; may repeat immediately
+#   weighted_history — avoid last N played songs (default)
+#   round_robin      — play every song once before repeating
+#   least_played     — always prefer the song with fewest plays
+strategy      = "round_robin"
+# recent_window: songs to exclude for weighted_history.
+# 0 = automatic: min(total_songs/2, 20)
+recent_window = 0
+
+[queue]
+# strategy: manual_only | auto_refill | preload
+#   manual_only — only songs added via the HTTP API will play; stops when empty
+#   auto_refill — auto-pick songs and keep min_ahead queued (default)
+#   preload     — keep preload_size songs queued at all times
+strategy     = "auto_refill"
+# min_ahead: auto_refill fires when queue depth drops below this value
+min_ahead    = 1
+# preload_size: target queue depth for the preload strategy
+preload_size = 3

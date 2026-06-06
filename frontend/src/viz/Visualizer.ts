@@ -58,6 +58,7 @@ export class Visualizer {
   private center!: PIXI.Container;
   private bloom?: AdvancedBloomFilter;
   private rgb?: RGBSplitFilter;
+  private coreTween?: gsap.core.Tween;
 
   // bg
   private sky!: PIXI.Sprite;
@@ -96,7 +97,7 @@ export class Visualizer {
   private coreWrap!: PIXI.Container;
 
   private _blobH: BlobHarmonic[] = [];
-  private _blobM = 88;
+  private _blobM = 64;
   private _blobR: Float32Array;
   private _blobV: Float32Array;
   private _blobTmp: Float32Array;
@@ -127,8 +128,10 @@ export class Visualizer {
 
   private snap = { palette: '', density: 0, scene: '' };
 
-  private _waveX: number[] = [];
-  private _waveY: number[] = [];
+  private _fluidX = new Float32Array(128);
+  private _fluidY = new Float32Array(128);
+  private _waveX = new Float32Array(128);
+  private _waveY = new Float32Array(128);
 
   constructor(app: PIXI.Application, audio: AudioEngine, ramp: string[]) {
     this.app = app;
@@ -145,7 +148,7 @@ export class Visualizer {
     this.stage.addChild(this.bgLayer, this.glowLayer);
 
     try {
-      this.bloom = new AdvancedBloomFilter({ threshold: 0.42, bloomScale: 1.0, brightness: 1.05, blur: 8, quality: 6 });
+      this.bloom = new AdvancedBloomFilter({ threshold: 0.42, bloomScale: 0.85, brightness: 1.02, blur: 5, quality: 3 });
       const bloomFilter: PIXI.Filter = this.bloom as unknown as PIXI.Filter;
       this.glowLayer.filters = [bloomFilter];
     } catch (_) {}
@@ -231,7 +234,8 @@ export class Visualizer {
     c.addChild(this.aura2, this.aura1, this.shock, this.particles,
       this.fluid, this.bassRing, this.eq, this.wave, this.coreWrap, this.comets, this.sparkles);
 
-    gsap.to(this.coreWrap.scale, {
+    this.coreTween?.kill();
+    this.coreTween = gsap.to(this.coreWrap.scale, {
       x: 1.045, y: 1.045, duration: 2.6, yoyo: true, repeat: -1, ease: 'sine.inOut',
     });
 
@@ -245,7 +249,7 @@ export class Visualizer {
   private _buildParticles(density: number) {
     this.particles.removeChildren();
     this._parts = [];
-    const n = Math.round(130 * density);
+    const n = Math.round(96 * density);
     const tints = [this.pal.primary, this.pal.secondary, this.pal.accent];
     for (let i = 0; i < n; i++) {
       const darter = Math.random() < 0.42;
@@ -343,7 +347,7 @@ export class Visualizer {
     this.stars = new PIXI.Container();
     this.bgLayer.addChild(this.stars);
     this._stars = [];
-    const starN = Math.round((this.scene === 'space' ? 320 : 200) * this._density);
+    const starN = Math.round((this.scene === 'space' ? 220 : 140) * this._density);
     const starBand = this.scene === 'space' ? H : H * 0.82;
     for (let i = 0; i < starN; i++) {
       const s = new PIXI.Sprite(this.texDot);
@@ -612,11 +616,12 @@ export class Visualizer {
   private _drawFluid(intensity: number, vol: number) {
     const g = this.fluid; g.clear();
     const spec = this.audio.spectrum;
-    const M = 168;
+    const M = 128;
     const base = this.eqInner * 0.99;
     const amp = this.barMax * 0.6 * intensity;
     const usable = 250;
-    const pts: [number, number][] = [];
+    const xs = this._fluidX;
+    const ys = this._fluidY;
     for (let i = 0; i < M; i++) {
       const d = i / M;
       const t = d <= 0.5 ? d * 2 : (1 - d) * 2;
@@ -626,14 +631,15 @@ export class Visualizer {
                 + Math.sin(i * 0.21 - this.t * 0.8) * this.coreR * 0.04;
       const r = base + v * amp + wob;
       const ang = -Math.PI / 2 + d * TAU;
-      pts.push([Math.cos(ang) * r, Math.sin(ang) * r]);
+      xs[i] = Math.cos(ang) * r;
+      ys[i] = Math.sin(ang) * r;
     }
     g.beginFill(this.pal.primary, 0.07 + vol * 0.10);
     g.lineStyle({ width: 2, color: this.pal.primary, alpha: 0.32 + vol * 0.35 });
-    g.moveTo((pts[M - 1][0] + pts[0][0]) / 2, (pts[M - 1][1] + pts[0][1]) / 2);
+    g.moveTo((xs[M - 1] + xs[0]) / 2, (ys[M - 1] + ys[0]) / 2);
     for (let i = 0; i < M; i++) {
-      const cur = pts[i], next = pts[(i + 1) % M];
-      g.quadraticCurveTo(cur[0], cur[1], (cur[0] + next[0]) / 2, (cur[1] + next[1]) / 2);
+      const ni = (i + 1) % M;
+      g.quadraticCurveTo(xs[i], ys[i], (xs[i] + xs[ni]) / 2, (ys[i] + ys[ni]) / 2);
     }
     g.closePath(); g.endFill();
   }
@@ -642,9 +648,9 @@ export class Visualizer {
     const g = this.wave; g.clear();
     const spec = this.audio.spectrum;
     const baseR = this.eqInner * 0.97;
-    const steps = 160;
-    const xs = this._waveX; xs.length = 0;
-    const ys = this._waveY; ys.length = 0;
+    const steps = 128;
+    const xs = this._waveX;
+    const ys = this._waveY;
     for (let i = 0; i < steps; i++) {
       const f = i / steps;
       const t = f <= 0.5 ? f * 2 : (1 - f) * 2;
@@ -652,7 +658,8 @@ export class Visualizer {
       const wob = (spec[Math.min(bin, spec.length - 1)] || 0) * this.coreR * 1.1 * intensity;
       const ang = f * TAU - Math.PI / 2;
       const r = baseR + Math.sin(ang * 5 + this.t * 1.4) * 2 + wob;
-      xs.push(Math.cos(ang) * r); ys.push(Math.sin(ang) * r);
+      xs[i] = Math.cos(ang) * r;
+      ys[i] = Math.sin(ang) * r;
     }
     const drawLoop = (w: number, col: number, alpha: number) => {
       g.lineStyle({ width: w, color: col, alpha });
@@ -882,5 +889,25 @@ export class Visualizer {
       g.lineTo(tailX, tailY);
       g.beginFill(s.col, k); g.drawCircle(s.x, s.y, 1.8); g.endFill();
     }
+  }
+
+  dispose() {
+    this.coreTween?.kill();
+    this.coreTween = undefined;
+    if (this.bgLayer.parent) this.bgLayer.parent.removeChild(this.bgLayer);
+    if (this.glowLayer.parent) this.glowLayer.parent.removeChild(this.glowLayer);
+    this.bgLayer.destroy({ children: true });
+    this.glowLayer.destroy({ children: true });
+    this._clouds = [];
+    this._fogBlobs = [];
+    this._auroraBands = [];
+    this._stars = [];
+    this._shoots = [];
+    this._ridges = [];
+    this._parts = [];
+    this._shocks = [];
+    this._sparkPool = [];
+    this._cometPool = [];
+    this._coreStains = [];
   }
 }

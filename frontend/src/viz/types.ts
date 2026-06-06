@@ -9,8 +9,6 @@ export interface VizConfig {
   aberration: number;
   scene: 'mountains' | 'space';
   chrome: boolean;
-  trackTitle: string;
-  trackArtist: string;
 }
 
 export interface AudioBands {

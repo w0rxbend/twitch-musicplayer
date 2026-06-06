@@ -70,21 +70,6 @@ function TweakRadio(props: { label: string; value: string; options: { value: str
   );
 }
 
-function TweakText(props: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div class="twk-row">
-      <div class="twk-lbl"><span>{props.label}</span></div>
-      <input
-        class="twk-field"
-        type="text"
-        value={props.value}
-        placeholder={props.label}
-        onInput={(e) => props.onChange((e.currentTarget as HTMLInputElement).value)}
-      />
-    </div>
-  );
-}
-
 export function TweaksPanel(props: Props) {
   let panelRef!: HTMLDivElement;
 
@@ -207,16 +192,6 @@ export function TweaksPanel(props: Props) {
           label="Show overlay"
           value={config.chrome}
           onChange={(v) => setConfig('chrome', v)}
-        />
-        <TweakText
-          label="Track"
-          value={config.trackTitle}
-          onChange={(v) => setConfig('trackTitle', v)}
-        />
-        <TweakText
-          label="Caption"
-          value={config.trackArtist}
-          onChange={(v) => setConfig('trackArtist', v)}
         />
       </div>
     </div>

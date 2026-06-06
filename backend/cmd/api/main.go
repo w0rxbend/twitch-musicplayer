@@ -36,29 +36,44 @@ func main() {
 	queueRepo := repository.NewQueueRepo(sqlDB)
 
 	// ── Queue manager ─────────────────────────────────────────────────────────
-	queueMgr := queue.New(songRepo, historyRepo, queueRepo)
+	queueMgr := queue.New(songRepo, historyRepo, queueRepo, queue.ManagerConfig{
+		Shuffle: queue.ShuffleConfig{
+			Strategy:     queue.ShuffleStrategy(cfg.Shuffle.Strategy),
+			RecentWindow: cfg.Shuffle.RecentWindow,
+		},
+		Fill: queue.FillConfig{
+			Strategy:    queue.FillStrategy(cfg.Queue.Strategy),
+			MinAhead:    cfg.Queue.MinAhead,
+			PreloadSize: cfg.Queue.PreloadSize,
+		},
+	})
 
 	// ── WebSocket hub ─────────────────────────────────────────────────────────
 	hub := websocket.NewHub()
 	go hub.Run()
 
 	// ── File watcher ──────────────────────────────────────────────────────────
-	fsWatcher, err := watcher.New(cfg.MusicDir, songRepo, queueMgr, func(_ *models.Song) {
-		// Broadcast queue_updated notification to all connected clients.
-		msg, encErr := websocket.Encode(websocket.MsgQueueUpdated, websocket.QueueUpdatedPayload{
-			Reason: "new_file",
-		})
-		if encErr == nil {
-			hub.Broadcast(msg)
-		}
-	})
+	fsWatcher, err := watcher.New(
+		cfg.MusicDir,
+		cfg.Music.Extensions,
+		songRepo,
+		queueMgr,
+		func(_ *models.Song) {
+			msg, encErr := websocket.Encode(websocket.MsgQueueUpdated, websocket.QueueUpdatedPayload{
+				Reason: "new_file",
+			})
+			if encErr == nil {
+				hub.Broadcast(msg)
+			}
+		},
+	)
 	if err != nil {
 		log.Fatalf("watcher init failed: %v", err)
 	}
 
 	// ── HTTP API handlers ────────────────────────────────────────────────────
 	songsH := api.NewSongsHandler(songRepo, cfg.MusicDir)
-	queueH := api.NewQueueHandler(queueMgr, queueRepo)
+	queueH := api.NewQueueHandler(queueMgr, queueRepo, hub)
 	historyH := api.NewHistoryHandler(historyRepo)
 	playerH := api.NewPlayerHandler(songRepo, queueRepo, historyRepo, hub)
 
@@ -79,7 +94,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Scan existing music files before starting the watcher loop.
 	if err := fsWatcher.ScanExisting(ctx); err != nil {
 		log.Printf("warning: scan existing failed: %v", err)
 	}
@@ -104,8 +118,8 @@ func main() {
 		done <- true
 	}()
 
-	log.Printf("lofi-radio-backend listening on :%d  music=%s  db=%s",
-		cfg.Port, cfg.MusicDir, cfg.DBPath)
+	log.Printf("lofi-radio-backend  port=%d  music=%s  db=%s  shuffle=%s  queue=%s",
+		cfg.Port, cfg.MusicDir, cfg.DBPath, cfg.Shuffle.Strategy, cfg.Queue.Strategy)
 
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %s", err)

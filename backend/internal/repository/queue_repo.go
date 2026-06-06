@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"sync"
 
 	"lofi-radio-backend/internal/models"
 )
@@ -17,18 +18,35 @@ type QueueRepository interface {
 	Count(ctx context.Context) (int, error)
 }
 
+const queueSongJoin = `
+SELECT q.id, q.song_id, q.position, q.source, q.added_at,
+       s.` + songFields + `
+FROM queue q
+JOIN songs s ON s.id = q.song_id`
+
+func scanQueueItem(row interface{ Scan(...any) error }) (*models.QueueItem, error) {
+	item := &models.QueueItem{Song: &models.Song{}}
+	err := row.Scan(
+		&item.ID, &item.SongID, &item.Position, &item.Source, &item.AddedAt,
+		&item.Song.ID, &item.Song.Filename, &item.Song.Path, &item.Song.Title,
+		&item.Song.Artist, &item.Song.Album, &item.Song.DurationSecs,
+		&item.Song.SizeBytes, &item.Song.AddedAt,
+	)
+	return item, err
+}
+
 // SQLiteQueueRepo is the SQLite-backed implementation of QueueRepository.
 type SQLiteQueueRepo struct {
 	db *sql.DB
+	mu sync.Mutex
 }
 
-// NewQueueRepo creates a new SQLiteQueueRepo.
-func NewQueueRepo(db *sql.DB) *SQLiteQueueRepo {
-	return &SQLiteQueueRepo{db: db}
-}
+func NewQueueRepo(db *sql.DB) *SQLiteQueueRepo { return &SQLiteQueueRepo{db: db} }
 
-// Enqueue appends an item to the queue, automatically assigning the next position.
 func (r *SQLiteQueueRepo) Enqueue(ctx context.Context, item *models.QueueItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -39,7 +57,6 @@ func (r *SQLiteQueueRepo) Enqueue(ctx context.Context, item *models.QueueItem) e
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),0)+1 FROM queue`).Scan(&nextPos); err != nil {
 		return err
 	}
-
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO queue (id, song_id, position, source, added_at) VALUES (?,?,?,?,?)`,
 		item.ID, item.SongID, nextPos, item.Source, item.AddedAt,
@@ -51,50 +68,36 @@ func (r *SQLiteQueueRepo) Enqueue(ctx context.Context, item *models.QueueItem) e
 	return tx.Commit()
 }
 
-// Dequeue removes and returns the lowest-position item in the queue with its song populated.
-// Returns sql.ErrNoRows if the queue is empty.
 func (r *SQLiteQueueRepo) Dequeue(ctx context.Context) (*models.QueueItem, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	item := &models.QueueItem{Song: &models.Song{}}
-	err = tx.QueryRowContext(ctx,
-		`SELECT q.id, q.song_id, q.position, q.source, q.added_at,
-		        s.id, s.filename, s.path, s.title, s.size_bytes, s.added_at
-		 FROM queue q
-		 JOIN songs s ON s.id = q.song_id
-		 ORDER BY q.position ASC
-		 LIMIT 1`,
-	).Scan(
-		&item.ID, &item.SongID, &item.Position, &item.Source, &item.AddedAt,
-		&item.Song.ID, &item.Song.Filename, &item.Song.Path, &item.Song.Title, &item.Song.SizeBytes, &item.Song.AddedAt,
-	)
+	item, err := scanQueueItem(tx.QueryRowContext(ctx,
+		queueSongJoin+` ORDER BY q.position ASC, q.added_at ASC, q.id ASC LIMIT 1`,
+	))
 	if err != nil {
 		return nil, err
 	}
-
 	if _, err = tx.ExecContext(ctx, `DELETE FROM queue WHERE id=?`, item.ID); err != nil {
 		return nil, err
 	}
-
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	return item, nil
 }
 
-// List returns all queue items ordered by position ascending, with songs populated.
 func (r *SQLiteQueueRepo) List(ctx context.Context) ([]*models.QueueItem, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT q.id, q.song_id, q.position, q.source, q.added_at,
-		        s.id, s.filename, s.path, s.title, s.size_bytes, s.added_at
-		 FROM queue q
-		 JOIN songs s ON s.id = q.song_id
-		 ORDER BY q.position ASC`,
-	)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rows, err := r.db.QueryContext(ctx, queueSongJoin+` ORDER BY q.position ASC, q.added_at ASC, q.id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -102,11 +105,7 @@ func (r *SQLiteQueueRepo) List(ctx context.Context) ([]*models.QueueItem, error)
 
 	var items []*models.QueueItem
 	for rows.Next() {
-		item := &models.QueueItem{Song: &models.Song{}}
-		err := rows.Scan(
-			&item.ID, &item.SongID, &item.Position, &item.Source, &item.AddedAt,
-			&item.Song.ID, &item.Song.Filename, &item.Song.Path, &item.Song.Title, &item.Song.SizeBytes, &item.Song.AddedAt,
-		)
+		item, err := scanQueueItem(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -115,20 +114,36 @@ func (r *SQLiteQueueRepo) List(ctx context.Context) ([]*models.QueueItem, error)
 	return items, rows.Err()
 }
 
-// Remove deletes a specific queue item by ID.
 func (r *SQLiteQueueRepo) Remove(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM queue WHERE id=?`, id)
-	return err
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	res, err := r.db.ExecContext(ctx, `DELETE FROM queue WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
-// Clear removes all items from the queue.
 func (r *SQLiteQueueRepo) Clear(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	_, err := r.db.ExecContext(ctx, `DELETE FROM queue`)
 	return err
 }
 
-// Count returns the total number of items currently in the queue.
 func (r *SQLiteQueueRepo) Count(ctx context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM queue`).Scan(&count)
 	return count, err

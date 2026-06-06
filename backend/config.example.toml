@@ -1,0 +1,26 @@
+# Lofi Radio backend configuration.
+
+[server]
+port = 8080
+base_url = "http://localhost:8080"
+
+[database]
+path = "./lofi-radio.db"
+
+[music]
+dir = "./music"
+extensions = [".mp3", ".MP3"]
+
+[shuffle]
+# random | weighted_history | round_robin | least_played
+strategy = "round_robin"
+# Used by weighted_history. 0 means automatic: min(total_songs/2, 20).
+recent_window = 0
+
+[queue]
+# manual_only | auto_refill | preload
+strategy = "auto_refill"
+# auto_refill keeps this many automatic songs queued ahead.
+min_ahead = 1
+# preload keeps this many songs queued when strategy is preload.
+preload_size = 3

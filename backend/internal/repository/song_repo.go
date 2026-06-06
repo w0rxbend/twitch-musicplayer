@@ -16,43 +16,42 @@ type SongRepository interface {
 	Count(ctx context.Context) (int, error)
 }
 
-// SQLiteSongRepo is the SQLite-backed implementation of SongRepository.
-type SQLiteSongRepo struct {
-	db *sql.DB
+const songFields = `id, filename, path, title, artist, album, duration_secs, size_bytes, added_at`
+
+func scanSong(row interface{ Scan(...any) error }, s *models.Song) error {
+	return row.Scan(&s.ID, &s.Filename, &s.Path, &s.Title, &s.Artist, &s.Album, &s.DurationSecs, &s.SizeBytes, &s.AddedAt)
 }
+
+// SQLiteSongRepo is the SQLite-backed implementation of SongRepository.
+type SQLiteSongRepo struct{ db *sql.DB }
 
 // NewSongRepo creates a new SQLiteSongRepo.
-func NewSongRepo(db *sql.DB) *SQLiteSongRepo {
-	return &SQLiteSongRepo{db: db}
-}
+func NewSongRepo(db *sql.DB) *SQLiteSongRepo { return &SQLiteSongRepo{db: db} }
 
-// Create inserts a new song record.
 func (r *SQLiteSongRepo) Create(ctx context.Context, song *models.Song) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO songs (id, filename, path, title, size_bytes, added_at) VALUES (?,?,?,?,?,?)`,
-		song.ID, song.Filename, song.Path, song.Title, song.SizeBytes, song.AddedAt,
+		`INSERT INTO songs (id, filename, path, title, artist, album, duration_secs, size_bytes, added_at)
+		 VALUES (?,?,?,?,?,?,?,?,?)`,
+		song.ID, song.Filename, song.Path, song.Title, song.Artist, song.Album,
+		song.DurationSecs, song.SizeBytes, song.AddedAt,
 	)
 	return err
 }
 
-// GetByID retrieves a single song by its ID.
 func (r *SQLiteSongRepo) GetByID(ctx context.Context, id string) (*models.Song, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, filename, path, title, size_bytes, added_at FROM songs WHERE id = ?`,
-		id,
-	)
-	song := &models.Song{}
-	err := row.Scan(&song.ID, &song.Filename, &song.Path, &song.Title, &song.SizeBytes, &song.AddedAt)
+	s := &models.Song{}
+	err := scanSong(r.db.QueryRowContext(ctx,
+		`SELECT `+songFields+` FROM songs WHERE id = ?`, id,
+	), s)
 	if err != nil {
 		return nil, err
 	}
-	return song, nil
+	return s, nil
 }
 
-// List returns all songs ordered by added_at ascending.
 func (r *SQLiteSongRepo) List(ctx context.Context) ([]*models.Song, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, filename, path, title, size_bytes, added_at FROM songs ORDER BY added_at ASC`,
+		`SELECT `+songFields+` FROM songs ORDER BY added_at ASC`,
 	)
 	if err != nil {
 		return nil, err
@@ -62,7 +61,7 @@ func (r *SQLiteSongRepo) List(ctx context.Context) ([]*models.Song, error) {
 	var songs []*models.Song
 	for rows.Next() {
 		s := &models.Song{}
-		if err := rows.Scan(&s.ID, &s.Filename, &s.Path, &s.Title, &s.SizeBytes, &s.AddedAt); err != nil {
+		if err := scanSong(rows, s); err != nil {
 			return nil, err
 		}
 		songs = append(songs, s)
@@ -70,20 +69,12 @@ func (r *SQLiteSongRepo) List(ctx context.Context) ([]*models.Song, error) {
 	return songs, rows.Err()
 }
 
-// ExistsByPath returns true if a song with the given path already exists.
 func (r *SQLiteSongRepo) ExistsByPath(ctx context.Context, path string) (bool, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(1) FROM songs WHERE path = ?`,
-		path,
-	).Scan(&count)
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM songs WHERE path = ?`, path).Scan(&count)
+	return count > 0, err
 }
 
-// Count returns the total number of songs.
 func (r *SQLiteSongRepo) Count(ctx context.Context) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM songs`).Scan(&count)

@@ -4,7 +4,7 @@ import type { AudioBands } from '../viz/types';
 const BINS = 512;
 
 export class AudioEngine {
-  mode: 'idle' | 'file' | 'mic' = 'idle';
+  mode: 'idle' | 'backend' = 'idle';
   ctx: AudioContext | null = null;
   analyser: AnalyserNode | null = null;
   raw: Uint8Array = new Uint8Array(BINS);
@@ -19,11 +19,13 @@ export class AudioEngine {
   private _bassAvg = 0;
   private _beatCooldown = 0;
   private _audioEl: HTMLAudioElement | null = null;
-  private _micStream: MediaStream | null = null;
+  private _mediaSource: MediaElementAudioSourceNode | null = null;
   private _real: Uint8Array<ArrayBuffer> = new Uint8Array(BINS) as Uint8Array<ArrayBuffer>;
   private _t = 0;
+  private _disposed = false;
 
   private _ensureCtx() {
+    if (this._disposed) return;
     if (this.ctx) return;
     const AC = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AC();
@@ -34,58 +36,51 @@ export class AudioEngine {
   }
 
   async resume() {
+    if (this._disposed) return;
     if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
   }
 
-  async loadFile(file: File): Promise<string> {
+  private _ensureAudioElement() {
     this._ensureCtx();
-    await this.resume();
+    if (!this.ctx || !this.analyser) throw new Error('audio engine disposed');
     if (!this._audioEl) {
       this._audioEl = new Audio();
       this._audioEl.crossOrigin = 'anonymous';
-      this._audioEl.loop = true;
-      const src = this.ctx!.createMediaElementSource(this._audioEl);
-      src.connect(this.analyser!);
+      this._audioEl.preload = 'auto';
+      this._mediaSource = this.ctx!.createMediaElementSource(this._audioEl);
+      this._mediaSource.connect(this.analyser!);
       this.analyser!.connect(this.ctx!.destination);
     }
-    if (this._micStream) this._stopMic();
-    this._audioEl.src = URL.createObjectURL(file);
-    try { await this._audioEl.play(); this.playing = true; } catch (_) {}
-    this.mode = 'file';
+    this._audioEl.onended = null;
+    this._audioEl.onerror = null;
+    return this._audioEl;
+  }
+
+  async playStream(
+    streamUrl: string,
+    sourceName: string,
+    handlers: { onEnded?: () => void; onError?: (error: Event) => void } = {},
+  ): Promise<void> {
+    const audioEl = this._ensureAudioElement();
+    await this.resume();
+    audioEl.pause();
+    audioEl.loop = false;
+    audioEl.onended = handlers.onEnded ?? null;
+    audioEl.onerror = handlers.onError ? event => handlers.onError?.(event instanceof Event ? event : new Event('error')) : null;
+    audioEl.src = streamUrl;
+    this.mode = 'backend';
     this.hasUserSource = true;
-    this.sourceName = file.name.replace(/\.[^.]+$/, '');
-    return this.sourceName;
+    this.sourceName = sourceName;
+    await audioEl.play();
+    this.playing = true;
   }
 
   togglePlay(): boolean {
-    if (this.mode === 'file' && this._audioEl) {
+    if (this.mode === 'backend' && this._audioEl) {
       if (this._audioEl.paused) { this._audioEl.play(); this.playing = true; }
       else { this._audioEl.pause(); this.playing = false; }
     }
     return this.playing;
-  }
-
-  async enableMic(): Promise<boolean> {
-    this._ensureCtx();
-    await this.resume();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    if (this._audioEl) { this._audioEl.pause(); this.playing = false; }
-    this._micStream = stream;
-    const src = this.ctx!.createMediaStreamSource(stream);
-    src.connect(this.analyser!);
-    this.mode = 'mic';
-    this.hasUserSource = true;
-    this.sourceName = 'live input';
-    return true;
-  }
-
-  private _stopMic() {
-    if (this._micStream) {
-      this._micStream.getTracks().forEach((t) => t.stop());
-      this._micStream = null;
-    }
   }
 
   private _synth(dt: number, intensity: number) {
@@ -133,10 +128,11 @@ export class AudioEngine {
   }
 
   update(dt: number, intensity = 1) {
+    if (this._disposed) return;
     const usingReal =
-      (this.mode === 'file' || this.mode === 'mic') &&
+      this.mode === 'backend' &&
       this.analyser &&
-      (this.mode === 'mic' || this.playing);
+      this.playing;
 
     if (usingReal) {
       this.analyser!.getByteFrequencyData(this._real);
@@ -171,5 +167,30 @@ export class AudioEngine {
       this.beatStrength = clamp((instBass - this._bassAvg) * 3, 0.3, 1.2);
       this._beatCooldown = 0.16;
     }
+  }
+
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    this.playing = false;
+    this.mode = 'idle';
+    this.hasUserSource = false;
+    this.sourceName = '';
+
+    if (this._audioEl) {
+      this._audioEl.pause();
+      this._audioEl.onended = null;
+      this._audioEl.onerror = null;
+      this._audioEl.removeAttribute('src');
+      this._audioEl.load();
+      this._audioEl = null;
+    }
+    this._mediaSource?.disconnect();
+    this._mediaSource = null;
+    this.analyser?.disconnect();
+    this.analyser = null;
+    const ctx = this.ctx;
+    this.ctx = null;
+    if (ctx && ctx.state !== 'closed') void ctx.close();
   }
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -51,9 +52,15 @@ func buildRoutes(opts Options) http.Handler {
 	}))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		health := opts.DB.Health()
+		status := http.StatusOK
+		if health["status"] == "down" {
+			status = http.StatusServiceUnavailable
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = opts.DB.Health()
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(health) //nolint:errcheck
 	})
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {

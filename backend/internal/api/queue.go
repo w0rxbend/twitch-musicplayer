@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"lofi-radio-backend/internal/models"
+	queuemgr "lofi-radio-backend/internal/queue"
+	"lofi-radio-backend/internal/websocket"
 )
 
 // queueManager covers the high-level queue operations exposed by queue.Manager.
@@ -23,6 +26,10 @@ type queueRepo interface {
 	Remove(ctx context.Context, id string) error
 }
 
+type queueBroadcaster interface {
+	Broadcast(msg websocket.Message)
+}
+
 // playSongResponse is the response body returned by the Skip endpoint.
 type playSongResponse struct {
 	Song         *models.Song         `json:"song"`
@@ -36,13 +43,14 @@ type addToQueueRequest struct {
 
 // QueueHandler handles queue resource endpoints.
 type QueueHandler struct {
-	mgr  queueManager
-	repo queueRepo
+	mgr         queueManager
+	repo        queueRepo
+	broadcaster queueBroadcaster
 }
 
 // NewQueueHandler constructs a QueueHandler.
-func NewQueueHandler(mgr queueManager, repo queueRepo) *QueueHandler {
-	return &QueueHandler{mgr: mgr, repo: repo}
+func NewQueueHandler(mgr queueManager, repo queueRepo, broadcaster queueBroadcaster) *QueueHandler {
+	return &QueueHandler{mgr: mgr, repo: repo, broadcaster: broadcaster}
 }
 
 // List handles GET /v1/queue.
@@ -74,8 +82,11 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.mgr.AddToQueue(r.Context(), req.SongID, models.QueueSourceManual); err != nil {
-		// queue.Manager wraps a "not found" error — treat it as 404.
-		writeError(w, http.StatusNotFound, "song not found")
+		if errors.Is(err, queuemgr.ErrSongNotFound) {
+			writeError(w, http.StatusNotFound, "song not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to add song to queue")
 		return
 	}
 
@@ -88,6 +99,7 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The last item in the queue is the one we just added.
+	h.broadcastQueueUpdated(r.Context(), "song_added")
 	writeJSON(w, http.StatusCreated, items[len(items)-1])
 }
 
@@ -98,6 +110,7 @@ func (h *QueueHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "queue item not found")
 		return
 	}
+	h.broadcastQueueUpdated(r.Context(), "song_removed")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -108,6 +121,7 @@ func (h *QueueHandler) Skip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to skip current song")
 		return
 	}
+	h.broadcastQueueUpdated(r.Context(), "skipped")
 	writeJSON(w, http.StatusOK, playSongResponse{
 		Song:         song,
 		HistoryEntry: entry,
@@ -120,5 +134,25 @@ func (h *QueueHandler) Clear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clear queue")
 		return
 	}
+	h.broadcastQueueUpdated(r.Context(), "cleared")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "queue cleared"})
+}
+
+func (h *QueueHandler) broadcastQueueUpdated(ctx context.Context, reason string) {
+	if h.broadcaster == nil {
+		return
+	}
+
+	depth := 0
+	if items, err := h.mgr.ListQueue(ctx); err == nil {
+		depth = len(items)
+	}
+
+	msg, err := websocket.Encode(websocket.MsgQueueUpdated, websocket.QueueUpdatedPayload{
+		QueueDepth: depth,
+		Reason:     reason,
+	})
+	if err == nil {
+		h.broadcaster.Broadcast(msg)
+	}
 }

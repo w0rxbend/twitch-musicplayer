@@ -1,25 +1,22 @@
-import { onMount, onCleanup } from 'solid-js';
+import { onCleanup, onMount } from 'solid-js';
 import * as PIXI from 'pixi.js';
 import { AudioEngine } from '../audio/AudioEngine';
-import { Visualizer } from '../viz/Visualizer';
-import { VIZ2_RAMP } from '../viz/config';
-import type { VizConfig } from '../viz/types';
+import { LogoOverlayVisualizer } from '../viz/LogoOverlayVisualizer';
 
 interface Props {
-  config: VizConfig;
-  onReady: (audio: AudioEngine, viz: Visualizer) => void;
+  onReady: (audio: AudioEngine) => void;
 }
 
-export function Stage(props: Props) {
+export function LogoOverlayStage(props: Props) {
   let stageRef!: HTMLDivElement;
 
   onMount(() => {
     const app = new PIXI.Application({
       resizeTo: stageRef,
-      antialias: false,
-      backgroundAlpha: 1,
-      backgroundColor: 0x04050d,
-      resolution: Math.min(window.devicePixelRatio || 1, 1.5),
+      antialias: true,
+      backgroundAlpha: 0,
+      clearBeforeRender: true,
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
       powerPreference: 'high-performance',
     });
@@ -28,24 +25,22 @@ export function Stage(props: Props) {
     stageRef.appendChild(app.view as HTMLCanvasElement);
 
     const audio = new AudioEngine();
-    const viz = new Visualizer(app, audio, VIZ2_RAMP);
-    viz.applyConfig(props.config, true);
-    viz.resize();
-    props.onReady(audio, viz);
+    const viz = new LogoOverlayVisualizer(app, audio);
+    props.onReady(audio);
 
     let last = performance.now();
     const update = () => {
       const now = performance.now();
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      audio.update(dt, props.config.intensity);
-      viz.applyConfig(props.config);
-      viz.update(dt, props.config);
+      audio.update(dt, 1.05);
+      viz.update(dt);
     };
     app.ticker.add(update);
 
     const ro = new ResizeObserver(() => viz.resize());
     ro.observe(stageRef);
+    viz.resize();
 
     onCleanup(() => {
       ro.disconnect();
@@ -56,5 +51,5 @@ export function Stage(props: Props) {
     });
   });
 
-  return <div id="stage" ref={stageRef!} />;
+  return <div id="logo-overlay-stage" ref={stageRef!} />;
 }
