@@ -201,7 +201,9 @@ func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool
 	m := meta.Extract(path)
 
 	song := &models.Song{
-		ID:           uuid.New().String(),
+		// UUIDv5 derived from the absolute path — stable across restarts so
+		// the Bloom filter stays valid without a persistent database.
+		ID:           uuid.NewSHA1(uuid.NameSpaceURL, []byte(path)).String(),
 		Filename:     filepath.Base(path),
 		Path:         path,
 		Title:        m.Title,

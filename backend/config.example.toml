@@ -4,8 +4,9 @@
 port = 8080
 base_url = "http://localhost:8080"
 
-[database]
-path = "./lofi-radio.db"
+[bloom]
+# Bloom filter persisting which songs have been played (the only on-disk state).
+path = "./lofi-radio.bloom"
 
 [music]
 dir = "./music"

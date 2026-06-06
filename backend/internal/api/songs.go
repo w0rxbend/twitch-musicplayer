@@ -14,9 +14,9 @@ import (
 	"lofi-radio-backend/internal/models"
 )
 
-// songRepo abstracts the persistence layer for songs.
 type songRepo interface {
 	List(ctx context.Context) ([]*models.Song, error)
+	Search(ctx context.Context, query string) ([]*models.Song, error)
 	GetByID(ctx context.Context, id string) (*models.Song, error)
 }
 
@@ -26,14 +26,20 @@ type SongsHandler struct {
 	musicDir string
 }
 
-// NewSongsHandler constructs a SongsHandler.
 func NewSongsHandler(repo songRepo, musicDir string) *SongsHandler {
 	return &SongsHandler{repo: repo, musicDir: musicDir}
 }
 
-// List handles GET /v1/songs.
+// List handles GET /v1/songs and GET /v1/songs?q=<query>.
 func (h *SongsHandler) List(w http.ResponseWriter, r *http.Request) {
-	songs, err := h.repo.List(r.Context())
+	var songs []*models.Song
+	var err error
+
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		songs, err = h.repo.Search(r.Context(), q)
+	} else {
+		songs, err = h.repo.List(r.Context())
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list songs")
 		return
@@ -76,8 +82,6 @@ func (h *SongsHandler) StreamContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// song.Path is the absolute path stored at index time. If it is relative,
-	// resolve it against the configured music directory.
 	path := song.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(h.musicDir, path)

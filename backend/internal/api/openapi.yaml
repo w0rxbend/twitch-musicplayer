@@ -1,0 +1,362 @@
+openapi: "3.0.3"
+info:
+  title: Lofi Radio API
+  version: "1.0.0"
+  description: >
+    Backend API for the Lofi Radio player. Handles song library, playback queue,
+    player state, and audio streaming. Real-time updates are delivered via WebSocket at `/ws`.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: songs
+    description: Music library
+  - name: queue
+    description: Playback queue management
+  - name: player
+    description: Player state
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: up
+        "503":
+          description: Service is unhealthy
+
+  /v1/songs:
+    get:
+      summary: List songs
+      description: Returns all indexed songs. Use `?q=` to filter by title, artist, album, or filename.
+      operationId: listSongs
+      tags: [songs]
+      parameters:
+        - name: q
+          in: query
+          description: Search query (matches title, artist, album, filename)
+          required: false
+          schema:
+            type: string
+            example: "lofi"
+      responses:
+        "200":
+          description: Song list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  songs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Song"
+                  total:
+                    type: integer
+
+  /v1/songs/{id}:
+    get:
+      summary: Get song by ID
+      operationId: getSong
+      tags: [songs]
+      parameters:
+        - $ref: "#/components/parameters/songId"
+      responses:
+        "200":
+          description: Song details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Song"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/songs/{id}/content:
+    get:
+      summary: Stream song audio
+      description: Returns the raw MP3 file. Supports `Range` headers for seeking.
+      operationId: streamSong
+      tags: [songs]
+      parameters:
+        - $ref: "#/components/parameters/songId"
+        - name: Range
+          in: header
+          schema:
+            type: string
+            example: "bytes=0-"
+      responses:
+        "200":
+          description: Full audio file
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial content (range response)
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/queue:
+    get:
+      summary: List queue
+      operationId: listQueue
+      tags: [queue]
+      responses:
+        "200":
+          description: Current playback queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/QueueItem"
+                  total:
+                    type: integer
+    post:
+      summary: Add song to queue
+      operationId: addToQueue
+      tags: [queue]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [song_id]
+              properties:
+                song_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Queue item created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueItem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/queue/{id}:
+    delete:
+      summary: Remove queue item
+      operationId: removeFromQueue
+      tags: [queue]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/queue:skip:
+    post:
+      summary: Skip current song
+      description: Advances to the next song in the queue according to the configured strategy.
+      operationId: skipCurrent
+      tags: [queue]
+      responses:
+        "200":
+          description: Next song selected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  song:
+                    $ref: "#/components/schemas/Song"
+
+  /v1/queue:clear:
+    post:
+      summary: Clear queue
+      description: Removes all pending entries from the queue.
+      operationId: clearQueue
+      tags: [queue]
+      responses:
+        "200":
+          description: Queue cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: queue cleared
+
+  /v1/queue:play-next:
+    post:
+      summary: Play song immediately
+      description: >
+        Inserts the requested song at the front of the queue and broadcasts `skip_now`
+        over WebSocket so connected audio clients interrupt their current track and
+        start playing the requested song.
+      operationId: playNext
+      tags: [queue]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [song_id]
+              properties:
+                song_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Song queued for immediate play
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: song queued for immediate play
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/player:
+    get:
+      summary: Get player state
+      description: Returns current song, queue length, and total library size.
+      operationId: getPlayerState
+      tags: [player]
+      responses:
+        "200":
+          description: Player state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlayerState"
+
+  /v1/player:skip:
+    post:
+      summary: Skip current track
+      description: >
+        Broadcasts `skip_now` over WebSocket to all connected audio clients
+        (main scene, overlay) so they immediately abandon the current track and
+        request the next one. No queue entry is consumed here — the natural
+        `need_song` → `NextSong` flow handles dequeue when the client responds.
+      operationId: skipPlayer
+      tags: [player]
+      responses:
+        "200":
+          description: Skip broadcast sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: skip broadcast
+
+components:
+  parameters:
+    songId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Song:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        duration_secs:
+          type: number
+          format: float
+        size_bytes:
+          type: integer
+          format: int64
+        added_at:
+          type: string
+          format: date-time
+
+    QueueItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        song_id:
+          type: string
+          format: uuid
+        song:
+          $ref: "#/components/schemas/Song"
+        position:
+          type: integer
+        source:
+          type: string
+          enum: [auto, manual]
+        added_at:
+          type: string
+          format: date-time
+
+    PlayerState:
+      type: object
+      properties:
+        current_song:
+          $ref: "#/components/schemas/Song"
+          nullable: true
+        queue_length:
+          type: integer
+        total_songs:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string

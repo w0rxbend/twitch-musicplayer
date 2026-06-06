@@ -81,6 +81,7 @@ type PlayedTracker interface {
 
 type QueueRepository interface {
 	Enqueue(ctx context.Context, item *models.QueueItem) error
+	EnqueueFront(ctx context.Context, item *models.QueueItem) error
 	Dequeue(ctx context.Context) (*models.QueueItem, error)
 	List(ctx context.Context) ([]*models.QueueItem, error)
 	Remove(ctx context.Context, id string) error
@@ -387,4 +388,25 @@ func (m *Manager) SkipCurrent(ctx context.Context) (*models.Song, error) {
 // ClearQueue removes all pending queue entries.
 func (m *Manager) ClearQueue(ctx context.Context) error {
 	return m.queue.Clear(ctx)
+}
+
+// PlayNext inserts the given song at the front of the queue so it plays
+// immediately after the current track ends (or when a skip_now is broadcast).
+func (m *Manager) PlayNext(ctx context.Context, songID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, err := m.songs.GetByID(ctx, songID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrSongNotFound, songID)
+		}
+		return fmt.Errorf("get song %s: %w", songID, err)
+	}
+	item := &models.QueueItem{
+		ID:      uuid.New().String(),
+		SongID:  songID,
+		Source:  models.QueueSourceManual,
+		AddedAt: time.Now(),
+	}
+	return m.queue.EnqueueFront(ctx, item)
 }

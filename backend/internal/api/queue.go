@@ -13,15 +13,14 @@ import (
 	"lofi-radio-backend/internal/websocket"
 )
 
-// queueManager covers the high-level queue operations exposed by queue.Manager.
 type queueManager interface {
 	AddToQueue(ctx context.Context, songID string, source models.QueueSource) error
+	PlayNext(ctx context.Context, songID string) error
 	ListQueue(ctx context.Context) ([]*models.QueueItem, error)
 	SkipCurrent(ctx context.Context) (*models.Song, error)
 	ClearQueue(ctx context.Context) error
 }
 
-// queueRepo covers low-level queue store operations (e.g. Remove by ID).
 type queueRepo interface {
 	Remove(ctx context.Context, id string) error
 }
@@ -30,8 +29,11 @@ type queueBroadcaster interface {
 	Broadcast(msg websocket.Message)
 }
 
-// addToQueueRequest is the request body for POST /v1/queue.
 type addToQueueRequest struct {
+	SongID string `json:"song_id"`
+}
+
+type playNextRequest struct {
 	SongID string `json:"song_id"`
 }
 
@@ -42,7 +44,6 @@ type QueueHandler struct {
 	broadcaster queueBroadcaster
 }
 
-// NewQueueHandler constructs a QueueHandler.
 func NewQueueHandler(mgr queueManager, repo queueRepo, broadcaster queueBroadcaster) *QueueHandler {
 	return &QueueHandler{mgr: mgr, repo: repo, broadcaster: broadcaster}
 }
@@ -84,7 +85,6 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the newly queued item by fetching the updated queue tail.
 	items, err := h.mgr.ListQueue(r.Context())
 	if err != nil || len(items) == 0 {
 		w.WriteHeader(http.StatusCreated)
@@ -125,6 +125,38 @@ func (h *QueueHandler) Clear(w http.ResponseWriter, r *http.Request) {
 	}
 	h.broadcastQueueUpdated(r.Context(), "cleared")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "queue cleared"})
+}
+
+// PlayNext handles POST /v1/queue:play-next.
+// It inserts the requested song at the front of the queue and broadcasts
+// skip_now so connected audio clients interrupt their current track.
+func (h *QueueHandler) PlayNext(w http.ResponseWriter, r *http.Request) {
+	var req playNextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.SongID == "" {
+		writeError(w, http.StatusBadRequest, "song_id is required")
+		return
+	}
+
+	if err := h.mgr.PlayNext(r.Context(), req.SongID); err != nil {
+		if errors.Is(err, queuemgr.ErrSongNotFound) {
+			writeError(w, http.StatusNotFound, "song not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to queue song for immediate play")
+		return
+	}
+
+	// Tell all connected audio clients to abandon the current track and pull
+	// the next one (which is now the requested song at position 0).
+	if msg, err := websocket.Encode(websocket.MsgSkipNow, nil); err == nil {
+		h.broadcaster.Broadcast(msg)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "song queued for immediate play"})
 }
 
 func (h *QueueHandler) broadcastQueueUpdated(ctx context.Context, reason string) {

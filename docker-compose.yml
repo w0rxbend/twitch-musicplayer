@@ -7,11 +7,11 @@ services:
       - "8080:8080"
     volumes:
       - ${MUSIC_DIR:-./music}:/music:ro
-      - lofi-data:/data
+      - bloom-data:/data
     environment:
       PORT: "8080"
       MUSIC_DIR: /music
-      BLUEPRINT_DB_URL: /data/lofi-radio.db
+      BLOOM_PATH: /data/lofi-radio.bloom
       BASE_URL: http://localhost:8080
     restart: unless-stopped
 
@@ -29,4 +29,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  lofi-data:
+  bloom-data:

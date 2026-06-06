@@ -15,8 +15,10 @@ const (
 
 // Server -> Client message types
 const (
-	MsgPlaySong     = "play_song"     // payload: PlaySongPayload
-	MsgQueueUpdated = "queue_updated" // payload: QueueUpdatedPayload
+	MsgPlaySong     = "play_song"     // payload: PlaySongPayload (unicast to player)
+	MsgQueueUpdated = "queue_updated" // payload: QueueUpdatedPayload (broadcast)
+	MsgNowPlaying   = "now_playing"   // payload: NowPlayingPayload (broadcast, for management UIs)
+	MsgSkipNow      = "skip_now"      // no payload; tells audio clients to skip immediately (broadcast)
 	MsgError        = "error"         // payload: ErrorPayload
 	MsgHeartbeatAck = "heartbeat_ack"
 	MsgState        = "state" // sent on connect: PlayerState
@@ -45,7 +47,14 @@ type SongFinishedPayload struct {
 // QueueUpdatedPayload is broadcast when the queue changes.
 type QueueUpdatedPayload struct {
 	QueueDepth int    `json:"queue_depth"`
-	Reason     string `json:"reason"` // "song_added" | "song_removed" | "cleared" | "new_file"
+	Reason     string `json:"reason"` // "song_added" | "song_removed" | "cleared" | "new_file" | "song_started"
+}
+
+// NowPlayingPayload is broadcast whenever a new song starts playing.
+// Management UIs listen for this to update their "now playing" display.
+type NowPlayingPayload struct {
+	Song       models.Song `json:"song"`
+	QueueDepth int         `json:"queue_depth"`
 }
 
 // ErrorPayload carries an error description to the client.
@@ -55,6 +64,9 @@ type ErrorPayload struct {
 
 // Encode wraps a typed payload into a Message with JSON encoding.
 func Encode(msgType string, payload any) (Message, error) {
+	if payload == nil {
+		return Message{Type: msgType}, nil
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return Message{}, err

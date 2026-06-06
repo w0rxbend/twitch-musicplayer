@@ -11,20 +11,20 @@ import (
 	"github.com/go-chi/cors"
 
 	"lofi-radio-backend/internal/api"
-	"lofi-radio-backend/internal/database"
+	"lofi-radio-backend/internal/player"
 	"lofi-radio-backend/internal/websocket"
 )
 
 // Options holds all dependencies for the HTTP server.
 type Options struct {
-	Port     int
-	DB       database.Service
-	Hub      *websocket.Hub
-	Songs    *api.SongsHandler
-	Queue    *api.QueueHandler
-	Player   *api.PlayerHandler
-	BaseURL  string
-	QueueMgr websocket.QueueManager
+	Port         int
+	Hub          *websocket.Hub
+	Songs        *api.SongsHandler
+	Queue        *api.QueueHandler
+	Player       *api.PlayerHandler
+	BaseURL      string
+	QueueMgr     websocket.QueueManager
+	StateTracker *player.StateTracker
 }
 
 // New wires up the Chi router and returns a configured *http.Server.
@@ -51,20 +51,16 @@ func buildRoutes(opts Options) http.Handler {
 	}))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		health := opts.DB.Health()
-		status := http.StatusOK
-		if health["status"] == "down" {
-			status = http.StatusServiceUnavailable
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(health) //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]string{"status": "up"}) //nolint:errcheck
 	})
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		websocket.ServeWS(opts.Hub, opts.QueueMgr, opts.BaseURL, w, r)
+		websocket.ServeWS(opts.Hub, opts.QueueMgr, opts.BaseURL, opts.StateTracker, w, r)
 	})
+
+	r.Get("/swagger", api.ServeSwagger)
+	r.Get("/openapi.yaml", api.ServeOpenAPISpec)
 
 	api.RegisterRoutes(r, opts.Songs, opts.Queue, opts.Player)
 

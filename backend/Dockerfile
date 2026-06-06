@@ -8,27 +8,20 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /lofi-radio ./cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /lofi-radio ./cmd/api/main.go
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM scratch
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY --from=builder /lofi-radio /app/lofi-radio
-COPY config.example.toml /app/config.toml
-
-RUN mkdir -p /music /data
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /lofi-radio /lofi-radio
+COPY --from=builder /app/config.example.toml /config.toml
 
 EXPOSE 8080
 
 ENV PORT=8080 \
-    BLUEPRINT_DB_URL=/data/lofi-radio.db \
+    BLOOM_PATH=/data/lofi-radio.bloom \
     MUSIC_DIR=/music \
     BASE_URL=http://localhost:8080
 
-CMD ["/app/lofi-radio"]
+CMD ["/lofi-radio"]

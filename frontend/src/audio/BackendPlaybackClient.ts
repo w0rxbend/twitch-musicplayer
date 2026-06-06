@@ -8,7 +8,8 @@ type MessageType =
   | 'queue_updated'
   | 'error'
   | 'heartbeat_ack'
-  | 'state';
+  | 'state'
+  | 'skip_now';
 
 interface SocketMessage<T = unknown> {
   type: MessageType;
@@ -55,6 +56,7 @@ const messageTypes = new Set<MessageType>([
   'error',
   'heartbeat_ack',
   'state',
+  'skip_now',
 ]);
 
 export class BackendPlaybackClient {
@@ -178,6 +180,14 @@ export class BackendPlaybackClient {
         break;
       case 'queue_updated':
         if (!this.current && !this.pendingPlay && !this.awaitingSong) this.requestSong();
+        break;
+      case 'skip_now':
+        // Server requests an immediate track change (e.g. management UI "play now").
+        this.current = null;
+        window.clearTimeout(this.streamRetryTimer);
+        window.clearTimeout(this.errorRetryTimer);
+        this.awaitingSong = false;
+        this.requestSong();
         break;
       case 'error':
         if (msg.payload !== undefined && !isErrorPayload(msg.payload)) return;

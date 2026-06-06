@@ -2,8 +2,8 @@ import { clamp, lerp } from '../viz/util';
 import type { AudioBands } from '../viz/types';
 
 const BINS = 512;
-const DEFAULT_FADE_OUT_MS = 700;
-const DEFAULT_FADE_IN_MS = 700;
+const DEFAULT_FADE_OUT_MS = 2500;
+const DEFAULT_FADE_IN_MS = 2500;
 const userGestureRequiredMessage = 'audio requires a user gesture';
 
 interface AudioEngineOptions {

@@ -21,9 +21,11 @@ func RegisterRoutes(r chi.Router, songs *SongsHandler, queue *QueueHandler, play
 		r.Delete("/queue/{id}", queue.Remove)
 		r.Post("/queue:skip", queue.Skip)
 		r.Post("/queue:clear", queue.Clear)
+		r.Post("/queue:play-next", queue.PlayNext)
 
 		// Player
 		r.Get("/player", player.State)
+		r.Post("/player:skip", player.Skip)
 	})
 }
 

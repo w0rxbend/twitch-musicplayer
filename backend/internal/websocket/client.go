@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"lofi-radio-backend/internal/models"
+	"lofi-radio-backend/internal/player"
 )
 
 const (
@@ -37,39 +38,41 @@ type QueueManager interface {
 
 // Client represents a single connected WebSocket peer.
 type Client struct {
-	hub         *Hub
-	conn        *ws.Conn
-	send        chan Message
-	queueMgr    QueueManager
-	baseURL     string
-	currentSong *models.Song
-	mu          sync.Mutex
+	hub          *Hub
+	conn         *ws.Conn
+	send         chan Message
+	queueMgr     QueueManager
+	baseURL      string
+	stateTracker *player.StateTracker
+	currentSong  *models.Song
+	mu           sync.Mutex
 }
 
 // NewClient constructs a Client. Call ServeWS instead of this directly.
-func NewClient(hub *Hub, conn *ws.Conn, queueMgr QueueManager, baseURL string) *Client {
+func NewClient(hub *Hub, conn *ws.Conn, queueMgr QueueManager, baseURL string, st *player.StateTracker) *Client {
 	return &Client{
-		hub:      hub,
-		conn:     conn,
-		send:     make(chan Message, sendBufSize),
-		queueMgr: queueMgr,
-		baseURL:  baseURL,
+		hub:          hub,
+		conn:         conn,
+		send:         make(chan Message, sendBufSize),
+		queueMgr:     queueMgr,
+		baseURL:      baseURL,
+		stateTracker: st,
 	}
 }
 
 // ServeWS upgrades the HTTP connection to WebSocket, registers the client with
 // the hub, sends the initial state message, and starts the read/write pumps.
-func ServeWS(hub *Hub, queueMgr QueueManager, baseURL string, w http.ResponseWriter, r *http.Request) {
+func ServeWS(hub *Hub, queueMgr QueueManager, baseURL string, st *player.StateTracker, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade error: %v", err)
 		return
 	}
 
-	c := NewClient(hub, conn, queueMgr, baseURL)
+	c := NewClient(hub, conn, queueMgr, baseURL, st)
 	hub.Register(c)
 
-	// Send initial state: current queue depth.
+	// Send initial state: current song + queue depth.
 	go func() {
 		items, err := queueMgr.ListQueue(r.Context())
 		queueDepth := 0
@@ -77,6 +80,7 @@ func ServeWS(hub *Hub, queueMgr QueueManager, baseURL string, w http.ResponseWri
 			queueDepth = len(items)
 		}
 		state := models.PlayerState{
+			CurrentSong: st.GetCurrentSong(),
 			QueueLength: queueDepth,
 		}
 		msg, encErr := Encode(MsgState, state)
@@ -145,7 +149,9 @@ func (c *Client) handleMessage(msg Message) {
 	}
 }
 
-// sendNextSong fetches the next song from the queue and pushes a play_song message.
+// sendNextSong fetches the next song from the queue and pushes a play_song
+// message to this client. It also broadcasts now_playing and queue_updated to
+// all clients so management UIs stay in sync.
 func (c *Client) sendNextSong(ctx context.Context) {
 	song, err := c.queueMgr.NextSong(ctx)
 	if err != nil {
@@ -161,18 +167,24 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	}
 
 	items, _ := c.queueMgr.ListQueue(ctx)
+	queueDepth := len(items)
 
 	payload := PlaySongPayload{
 		Song:       *song,
 		StreamURL:  c.baseURL + "/v1/songs/" + song.ID + "/content",
-		HistoryID:  uuid.New().String(), // per-play correlation ID for the frontend
-		QueueDepth: len(items),
+		HistoryID:  uuid.New().String(),
+		QueueDepth: queueDepth,
 	}
 
 	playMsg, err := Encode(MsgPlaySong, payload)
 	if err != nil {
 		log.Printf("encode play_song: %v", err)
 		return
+	}
+
+	// Update shared state tracker so the REST player endpoint is current.
+	if c.stateTracker != nil {
+		c.stateTracker.SetCurrentSong(song)
 	}
 
 	c.mu.Lock()
@@ -183,6 +195,14 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	case c.send <- playMsg:
 	default:
 		log.Printf("send buffer full, dropping play_song for client")
+	}
+
+	// Broadcast to all peers so management UIs get live updates.
+	if nowMsg, encErr := Encode(MsgNowPlaying, NowPlayingPayload{Song: *song, QueueDepth: queueDepth}); encErr == nil {
+		c.hub.Broadcast(nowMsg)
+	}
+	if queueMsg, encErr := Encode(MsgQueueUpdated, QueueUpdatedPayload{QueueDepth: queueDepth, Reason: "song_started"}); encErr == nil {
+		c.hub.Broadcast(queueMsg)
 	}
 }
 
