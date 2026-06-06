@@ -1,19 +1,25 @@
 import { onCleanup, onMount } from 'solid-js';
+import { Stage } from './components/Stage';
 import { BackendPlaybackClient } from './audio/BackendPlaybackClient';
 import type { AudioEngine } from './audio/AudioEngine';
-import { LogoOverlayStage } from './components/LogoOverlayStage';
 
-export function OverlayApp() {
+interface Props {
+  transparent?: boolean;
+  showBackground?: boolean;
+}
+
+export function OverlayApp(props: Props = {}) {
   let backendClient: BackendPlaybackClient | null = null;
 
   onMount(() => {
-    document.body.classList.add('overlay-page');
+    document.documentElement.classList.add('overlay-page');
+    if (props.transparent) document.documentElement.classList.add('logo-overlay-page');
     const retryPending = () => backendClient?.retryPendingPlay();
     window.addEventListener('pointerdown', retryPending);
-
     onCleanup(() => {
       window.removeEventListener('pointerdown', retryPending);
-      document.body.classList.remove('overlay-page');
+      document.documentElement.classList.remove('overlay-page');
+      document.documentElement.classList.remove('logo-overlay-page');
     });
   });
 
@@ -25,5 +31,11 @@ export function OverlayApp() {
 
   onCleanup(() => backendClient?.dispose());
 
-  return <LogoOverlayStage onReady={onReady} />;
+  return (
+    <Stage
+      onReady={onReady}
+      transparent={props.transparent}
+      showBackground={props.showBackground ?? true}
+    />
+  );
 }

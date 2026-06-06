@@ -22,7 +22,6 @@ type Options struct {
 	Hub      *websocket.Hub
 	Songs    *api.SongsHandler
 	Queue    *api.QueueHandler
-	History  *api.HistoryHandler
 	Player   *api.PlayerHandler
 	BaseURL  string
 	QueueMgr websocket.QueueManager
@@ -67,7 +66,7 @@ func buildRoutes(opts Options) http.Handler {
 		websocket.ServeWS(opts.Hub, opts.QueueMgr, opts.BaseURL, w, r)
 	})
 
-	api.RegisterRoutes(r, opts.Songs, opts.Queue, opts.History, opts.Player)
+	api.RegisterRoutes(r, opts.Songs, opts.Queue, opts.Player)
 
 	return r
 }

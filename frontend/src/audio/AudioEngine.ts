@@ -2,6 +2,24 @@ import { clamp, lerp } from '../viz/util';
 import type { AudioBands } from '../viz/types';
 
 const BINS = 512;
+const DEFAULT_FADE_OUT_MS = 700;
+const DEFAULT_FADE_IN_MS = 700;
+const userGestureRequiredMessage = 'audio requires a user gesture';
+
+interface AudioEngineOptions {
+  allowAutoplay?: boolean;
+}
+
+type BrowserUserActivation = {
+  isActive?: boolean;
+  hasBeenActive?: boolean;
+};
+
+interface PlaybackChannel {
+  audioEl: HTMLAudioElement;
+  mediaSource: MediaElementAudioSourceNode;
+  gain: GainNode;
+}
 
 export class AudioEngine {
   mode: 'idle' | 'backend' = 'idle';
@@ -18,42 +36,128 @@ export class AudioEngine {
 
   private _bassAvg = 0;
   private _beatCooldown = 0;
-  private _audioEl: HTMLAudioElement | null = null;
-  private _mediaSource: MediaElementAudioSourceNode | null = null;
+  private _channelA: PlaybackChannel | null = null;
+  private _channelB: PlaybackChannel | null = null;
+  private _activeChannel: PlaybackChannel | null = null;
   private _real: Uint8Array<ArrayBuffer> = new Uint8Array(BINS) as Uint8Array<ArrayBuffer>;
   private _t = 0;
   private _disposed = false;
+  private _allowAutoplay: boolean;
+
+  constructor(options: AudioEngineOptions = {}) {
+    this._allowAutoplay = options.allowAutoplay === true;
+  }
+
+  get allowAutoplay() {
+    return this._allowAutoplay;
+  }
 
   private _ensureCtx() {
     if (this._disposed) return;
     if (this.ctx) return;
+    this._assertCanStartAudio();
+
     const AC = window.AudioContext || (window as any).webkitAudioContext;
     this.ctx = new AC();
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0.82;
     this._real = new Uint8Array(this.analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    this.analyser.connect(this.ctx.destination);
   }
 
   async resume() {
     if (this._disposed) return;
-    if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this._assertCanStartAudio();
+      await this.ctx.resume();
+    }
   }
 
-  private _ensureAudioElement() {
+  private _assertCanStartAudio() {
+    if (this.ctx && this.ctx.state !== 'suspended') return;
+    if (this._allowAutoplay) return;
+    if (this._hasUserActivation()) return;
+    throw new Error(userGestureRequiredMessage);
+  }
+
+  private _hasUserActivation() {
+    const activation = (navigator as Navigator & { userActivation?: BrowserUserActivation }).userActivation;
+    if (!activation) return true;
+    return activation.isActive === true || activation.hasBeenActive === true;
+  }
+
+  private _ensureChannel(channel?: PlaybackChannel | null): PlaybackChannel {
     this._ensureCtx();
     if (!this.ctx || !this.analyser) throw new Error('audio engine disposed');
-    if (!this._audioEl) {
-      this._audioEl = new Audio();
-      this._audioEl.crossOrigin = 'anonymous';
-      this._audioEl.preload = 'auto';
-      this._mediaSource = this.ctx!.createMediaElementSource(this._audioEl);
-      this._mediaSource.connect(this.analyser!);
-      this.analyser!.connect(this.ctx!.destination);
+    if (channel) return channel;
+
+    const audioEl = new Audio();
+    audioEl.autoplay = this._allowAutoplay;
+    audioEl.crossOrigin = 'anonymous';
+    audioEl.preload = 'auto';
+    const mediaSource = this.ctx.createMediaElementSource(audioEl);
+    const gain = this.ctx.createGain();
+    gain.gain.value = 1;
+    mediaSource.connect(gain);
+    gain.connect(this.analyser);
+
+    return { audioEl, mediaSource, gain };
+  }
+
+  private _nextChannel(): PlaybackChannel {
+    if (!this._channelA) {
+      this._channelA = this._ensureChannel(this._channelA);
     }
-    this._audioEl.onended = null;
-    this._audioEl.onerror = null;
-    return this._audioEl;
+    if (!this._channelB) {
+      this._channelB = this._ensureChannel(this._channelB);
+    }
+
+    if (!this._activeChannel) return this._channelA;
+    return this._activeChannel === this._channelA ? this._channelB : this._channelA;
+  }
+
+  private _activeAudioElement() {
+    return this._activeChannel?.audioEl ?? null;
+  }
+
+  private _setChannelGain(channel: PlaybackChannel | null, value: number) {
+    if (!channel) return;
+    const clamped = clamp(value, 0, 1);
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    channel.gain.gain.setValueAtTime(clamped, now);
+  }
+
+  private _fadeChannelTo(channel: PlaybackChannel | null, value: number, durationMs: number): Promise<void> {
+    if (!channel || !this.ctx) return Promise.resolve();
+
+    const clamped = clamp(value, 0, 1);
+    const now = this.ctx.currentTime;
+    const durationSec = Math.max(0, durationMs) / 1000;
+    const gain = channel.gain.gain;
+
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+    if (durationSec === 0) {
+      gain.setValueAtTime(clamped, now);
+      return Promise.resolve();
+    }
+
+    gain.linearRampToValueAtTime(clamped, now + durationSec);
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(0, Math.ceil(durationMs)));
+    });
+  }
+
+  private _stopChannel(channel: PlaybackChannel | null) {
+    if (!channel) return;
+    channel.audioEl.pause();
+    channel.audioEl.onended = null;
+    channel.audioEl.onerror = null;
+    channel.audioEl.removeAttribute('src');
+    channel.audioEl.load();
+    this._setChannelGain(channel, 0);
   }
 
   async playStream(
@@ -61,24 +165,57 @@ export class AudioEngine {
     sourceName: string,
     handlers: { onEnded?: () => void; onError?: (error: Event) => void } = {},
   ): Promise<void> {
-    const audioEl = this._ensureAudioElement();
     await this.resume();
-    audioEl.pause();
-    audioEl.loop = false;
-    audioEl.onended = handlers.onEnded ?? null;
-    audioEl.onerror = handlers.onError ? event => handlers.onError?.(event instanceof Event ? event : new Event('error')) : null;
-    audioEl.src = streamUrl;
+    const outgoing = this._activeChannel;
+    const incoming = this._nextChannel();
+    const wasPlaying = !!(outgoing && this.playing && !outgoing.audioEl.paused);
+    const hadSource = this.mode === 'backend' && !!outgoing?.audioEl.src;
+
+    this._setChannelGain(incoming, 0);
+    incoming.audioEl.onended = null;
+    incoming.audioEl.onerror = null;
+    incoming.audioEl.pause();
+    incoming.audioEl.loop = false;
+    incoming.audioEl.onended = handlers.onEnded ?? null;
+    incoming.audioEl.onerror = handlers.onError ? event => handlers.onError?.(event instanceof Event ? event : new Event('error')) : null;
+    incoming.audioEl.src = streamUrl;
+    incoming.audioEl.load();
     this.mode = 'backend';
     this.hasUserSource = true;
     this.sourceName = sourceName;
-    await audioEl.play();
-    this.playing = true;
+    this._activeChannel = incoming;
+    try {
+      await incoming.audioEl.play();
+      this.playing = true;
+      const fadeIn = this._fadeChannelTo(incoming, 1, DEFAULT_FADE_IN_MS);
+      const fadeOut = wasPlaying ? this._fadeChannelTo(outgoing, 0, DEFAULT_FADE_OUT_MS) : Promise.resolve();
+      await Promise.all([fadeIn, fadeOut]);
+
+      if (wasPlaying) {
+        this._stopChannel(outgoing);
+      }
+    } catch (error) {
+      this._stopChannel(incoming);
+      this._activeChannel = outgoing;
+      if (outgoing && wasPlaying) {
+        this._setChannelGain(outgoing, 1);
+        this.playing = true;
+      } else {
+        this.playing = false;
+      }
+      this.mode = hadSource ? 'backend' : 'idle';
+      throw error;
+    }
   }
 
   togglePlay(): boolean {
-    if (this.mode === 'backend' && this._audioEl) {
-      if (this._audioEl.paused) { this._audioEl.play(); this.playing = true; }
-      else { this._audioEl.pause(); this.playing = false; }
+    const active = this._activeAudioElement();
+    if (this.mode === 'backend' && active) {
+      if (active.paused) { active.play(); this.playing = true; }
+      else {
+        active.pause();
+        this.playing = false;
+      }
     }
     return this.playing;
   }
@@ -177,16 +314,27 @@ export class AudioEngine {
     this.hasUserSource = false;
     this.sourceName = '';
 
-    if (this._audioEl) {
-      this._audioEl.pause();
-      this._audioEl.onended = null;
-      this._audioEl.onerror = null;
-      this._audioEl.removeAttribute('src');
-      this._audioEl.load();
-      this._audioEl = null;
+    if (this._channelA) {
+      this._channelA.audioEl.pause();
+      this._channelA.audioEl.onended = null;
+      this._channelA.audioEl.onerror = null;
+      this._channelA.audioEl.removeAttribute('src');
+      this._channelA.audioEl.load();
+      this._channelA.mediaSource.disconnect();
+      this._channelA.gain.disconnect();
     }
-    this._mediaSource?.disconnect();
-    this._mediaSource = null;
+    if (this._channelB) {
+      this._channelB.audioEl.pause();
+      this._channelB.audioEl.onended = null;
+      this._channelB.audioEl.onerror = null;
+      this._channelB.audioEl.removeAttribute('src');
+      this._channelB.audioEl.load();
+      this._channelB.mediaSource.disconnect();
+      this._channelB.gain.disconnect();
+    }
+    this._channelA = null;
+    this._channelB = null;
+    this._activeChannel = null;
     this.analyser?.disconnect();
     this.analyser = null;
     const ctx = this.ctx;

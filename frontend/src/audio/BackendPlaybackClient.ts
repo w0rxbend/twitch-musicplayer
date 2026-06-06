@@ -32,9 +32,12 @@ interface ErrorPayload {
   message: string;
 }
 
+export interface SongInfo { title: string; artist?: string }
+
 interface BackendPlaybackOptions {
   audio: AudioEngine;
   onStatus?: (status: string) => void;
+  onSongChange?: (song: SongInfo | null) => void;
 }
 
 const reconnectBaseMs = 900;
@@ -57,6 +60,7 @@ const messageTypes = new Set<MessageType>([
 export class BackendPlaybackClient {
   private audio: AudioEngine;
   private onStatus?: (status: string) => void;
+  private onSongChange?: (song: SongInfo | null) => void;
   private socket: WebSocket | null = null;
   private reconnectTimer = 0;
   private heartbeatTimer = 0;
@@ -74,6 +78,7 @@ export class BackendPlaybackClient {
   constructor(options: BackendPlaybackOptions) {
     this.audio = options.audio;
     this.onStatus = options.onStatus;
+    this.onSongChange = options.onSongChange;
   }
 
   start() {
@@ -101,6 +106,7 @@ export class BackendPlaybackClient {
     }
     this.socket = null;
     this.connecting = false;
+    this.onSongChange?.(null);
   }
 
   retryPendingPlay() {
@@ -199,15 +205,17 @@ export class BackendPlaybackClient {
       this.current = payload;
       this.pendingPlay = null;
       window.clearTimeout(this.streamRetryTimer);
+      this.onSongChange?.({ title: songName, artist: payload.song.artist });
       this.onStatus?.('playing');
     } catch {
-      this.onStatus?.('click anywhere to start audio');
+      this.onStatus?.(this.audio.allowAutoplay ? 'audio autoplay blocked' : 'click anywhere to start audio');
     }
   }
 
   private finishCurrent(payload: PlaySongPayload) {
     if (this.current?.history_id !== payload.history_id) return;
     this.current = null;
+    this.onSongChange?.(null);
     this.queueOrSend({
       type: 'song_finished',
       payload: {
@@ -226,6 +234,7 @@ export class BackendPlaybackClient {
     if (this.current?.history_id !== payload.history_id && this.pendingPlay?.history_id !== payload.history_id) return;
     this.pendingPlay = payload;
     this.current = null;
+    this.onSongChange?.(null);
     this.onStatus?.('stream error, retrying');
     window.clearTimeout(this.streamRetryTimer);
     this.streamRetryTimer = window.setTimeout(() => {
@@ -285,6 +294,7 @@ export class BackendPlaybackClient {
     this.pendingPlay = null;
     this.current = null;
     this.awaitingSong = false;
+    this.onSongChange?.(null);
   }
 }
 

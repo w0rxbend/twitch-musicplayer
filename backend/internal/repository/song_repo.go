@@ -17,6 +17,7 @@ type SongRepository interface {
 }
 
 const songFields = `id, filename, path, title, artist, album, duration_secs, size_bytes, added_at`
+const qualifiedSongFields = `s.id, s.filename, s.path, s.title, s.artist, s.album, s.duration_secs, s.size_bytes, s.added_at`
 
 func scanSong(row interface{ Scan(...any) error }, s *models.Song) error {
 	return row.Scan(&s.ID, &s.Filename, &s.Path, &s.Title, &s.Artist, &s.Album, &s.DurationSecs, &s.SizeBytes, &s.AddedAt)

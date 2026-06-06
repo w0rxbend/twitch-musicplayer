@@ -34,14 +34,6 @@ CREATE TABLE IF NOT EXISTS queue (
     source   TEXT    NOT NULL DEFAULT 'auto',
     added_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
-
-CREATE TABLE IF NOT EXISTS history (
-    id          TEXT    PRIMARY KEY,
-    song_id     TEXT    NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
-    played_at   DATETIME NOT NULL DEFAULT (datetime('now')),
-    finished_at DATETIME,
-    finished    INTEGER NOT NULL DEFAULT 0
-);
 `
 	if _, err := db.Exec(schema); err != nil {
 		return err

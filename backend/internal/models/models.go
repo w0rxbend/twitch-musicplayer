@@ -33,20 +33,9 @@ type QueueItem struct {
 	AddedAt  time.Time   `json:"added_at"`
 }
 
-// HistoryEntry records a single play event.
-type HistoryEntry struct {
-	ID         string     `json:"id"`
-	SongID     string     `json:"song_id"`
-	Song       *Song      `json:"song,omitempty"`
-	PlayedAt   time.Time  `json:"played_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Finished   bool       `json:"finished"`
-}
-
 // PlayerState is the snapshot of current playback state sent over WebSocket.
 type PlayerState struct {
-	CurrentSong  *Song  `json:"current_song,omitempty"`
-	QueueLength  int    `json:"queue_length"`
-	TotalSongs   int    `json:"total_songs"`
-	HistoryCount int    `json:"history_count"`
+	CurrentSong *Song `json:"current_song,omitempty"`
+	QueueLength int   `json:"queue_length"`
+	TotalSongs  int   `json:"total_songs"`
 }

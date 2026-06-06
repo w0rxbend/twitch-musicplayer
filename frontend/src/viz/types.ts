@@ -1,16 +1,18 @@
-export interface VizConfig {
-  palette: string[];
-  colorCycle: boolean;
-  cycleSpeed: number;
-  intensity: number;
+export interface AudioFrame {
   bass: number;
-  bloom: number;
-  density: number;
-  aberration: number;
-  scene: 'mountains' | 'space';
-  chrome: boolean;
+  lowMid: number;
+  mid: number;
+  highMid: number;
+  treble: number;
+  rms: number;
+  peak: number;
+  beat: boolean;
+  beatStrength: number;
+  spectrum: Float32Array;
+  timeDomain: Float32Array;  // normalised -1..1, 1024 samples
 }
 
+// Kept for AudioEngine backward compatibility
 export interface AudioBands {
   bass: number;
   mids: number;

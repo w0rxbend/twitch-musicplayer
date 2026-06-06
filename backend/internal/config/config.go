@@ -3,7 +3,9 @@ package config
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	_ "github.com/joho/godotenv/autoload"
@@ -94,6 +96,9 @@ func Load() *Config {
 		cfg.Server.BaseURL = v
 	}
 
+	cfg.Database.Path = expandHomePath(cfg.Database.Path)
+	cfg.Music.Dir = expandHomePath(cfg.Music.Dir)
+
 	// Populate flat fields.
 	cfg.Port = cfg.Server.Port
 	cfg.DBPath = cfg.Database.Path
@@ -105,4 +110,23 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+func expandHomePath(path string) string {
+	if path == "" || path == "~" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			if path == "~" {
+				return home
+			}
+		}
+		return path
+	}
+
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, path[2:])
+		}
+	}
+
+	return path
 }

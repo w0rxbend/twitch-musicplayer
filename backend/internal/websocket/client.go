@@ -10,14 +10,15 @@ import (
 
 	ws "github.com/gorilla/websocket"
 
+	"github.com/google/uuid"
 	"lofi-radio-backend/internal/models"
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = 30 * time.Second
-	sendBufSize    = 16
+	writeWait   = 10 * time.Second
+	pongWait    = 60 * time.Second
+	pingPeriod  = 30 * time.Second
+	sendBufSize = 16
 )
 
 var upgrader = ws.Upgrader{
@@ -30,8 +31,7 @@ var upgrader = ws.Upgrader{
 
 // QueueManager is the subset of queue.Manager the client uses.
 type QueueManager interface {
-	NextSong(ctx context.Context) (*models.Song, *models.HistoryEntry, error)
-	MarkSongFinished(ctx context.Context, historyID string) error
+	NextSong(ctx context.Context) (*models.Song, error)
 	ListQueue(ctx context.Context) ([]*models.QueueItem, error)
 }
 
@@ -41,7 +41,7 @@ type Client struct {
 	conn        *ws.Conn
 	send        chan Message
 	queueMgr    QueueManager
-	baseURL     string // e.g. "http://localhost:8080"
+	baseURL     string
 	currentSong *models.Song
 	mu          sync.Mutex
 }
@@ -130,14 +130,7 @@ func (c *Client) handleMessage(msg Message) {
 		c.sendNextSong(ctx)
 
 	case MsgSongFinished:
-		var payload SongFinishedPayload
-		if err := DecodePayload(msg, &payload); err != nil {
-			log.Printf("decode song_finished payload: %v", err)
-		} else if payload.HistoryID != "" {
-			if err := c.queueMgr.MarkSongFinished(ctx, payload.HistoryID); err != nil {
-				log.Printf("mark song finished %s: %v", payload.HistoryID, err)
-			}
-		}
+		// Song is already marked played when it starts; just request the next one.
 		c.sendNextSong(ctx)
 
 	case MsgHeartbeat:
@@ -154,7 +147,7 @@ func (c *Client) handleMessage(msg Message) {
 
 // sendNextSong fetches the next song from the queue and pushes a play_song message.
 func (c *Client) sendNextSong(ctx context.Context) {
-	song, entry, err := c.queueMgr.NextSong(ctx)
+	song, err := c.queueMgr.NextSong(ctx)
 	if err != nil {
 		log.Printf("next song error: %v", err)
 		errMsg, encErr := Encode(MsgError, ErrorPayload{Message: err.Error()})
@@ -168,13 +161,12 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	}
 
 	items, _ := c.queueMgr.ListQueue(ctx)
-	queueDepth := len(items)
 
 	payload := PlaySongPayload{
 		Song:       *song,
 		StreamURL:  c.baseURL + "/v1/songs/" + song.ID + "/content",
-		HistoryID:  entry.ID,
-		QueueDepth: queueDepth,
+		HistoryID:  uuid.New().String(), // per-play correlation ID for the frontend
+		QueueDepth: len(items),
 	}
 
 	playMsg, err := Encode(MsgPlaySong, payload)
@@ -207,7 +199,6 @@ func (c *Client) writePump() {
 		case msg, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// Hub closed the channel.
 				c.conn.WriteMessage(ws.CloseMessage, []byte{})
 				return
 			}

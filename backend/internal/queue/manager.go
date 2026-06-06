@@ -41,7 +41,7 @@ const (
 // ShuffleConfig holds per-strategy shuffle parameters.
 type ShuffleConfig struct {
 	Strategy     ShuffleStrategy
-	RecentWindow int // 0 = auto
+	RecentWindow int // unused, kept for config compat
 }
 
 // FillConfig holds per-strategy queue-fill parameters.
@@ -59,7 +59,7 @@ type ManagerConfig struct {
 
 func defaultConfig() ManagerConfig {
 	return ManagerConfig{
-		Shuffle: ShuffleConfig{Strategy: ShuffleRoundRobin, RecentWindow: 0},
+		Shuffle: ShuffleConfig{Strategy: ShuffleRoundRobin},
 		Fill:    FillConfig{Strategy: FillAutoRefill, MinAhead: 1, PreloadSize: 3},
 	}
 }
@@ -72,11 +72,11 @@ type SongRepository interface {
 	Count(ctx context.Context) (int, error)
 }
 
-type HistoryRepository interface {
-	RecordStart(ctx context.Context, entry *models.HistoryEntry) error
-	MarkFinished(ctx context.Context, id string, finishedAt time.Time) error
-	GetRecentSongIDs(ctx context.Context, n int) ([]string, error)
-	GetSongPlayCounts(ctx context.Context) (map[string]int, error)
+// PlayedTracker is the Bloom filter interface for tracking played songs.
+type PlayedTracker interface {
+	MarkPlayed(songID string)
+	HasPlayed(songID string) bool
+	Reset()
 }
 
 type QueueRepository interface {
@@ -91,23 +91,78 @@ type QueueRepository interface {
 // Manager is the brain of the service — decides which song plays next.
 type Manager struct {
 	songs   SongRepository
-	history HistoryRepository
+	tracker PlayedTracker
 	queue   QueueRepository
 	cfg     ManagerConfig
 	mu      sync.Mutex
 }
 
 // New constructs a Manager. Pass a zero-value ManagerConfig to use defaults.
-func New(songs SongRepository, history HistoryRepository, queue QueueRepository, cfg ManagerConfig) *Manager {
+func New(songs SongRepository, tracker PlayedTracker, queue QueueRepository, cfg ManagerConfig) *Manager {
 	if cfg.Shuffle.Strategy == "" {
 		cfg = defaultConfig()
 	}
-	return &Manager{songs: songs, history: history, queue: queue, cfg: cfg}
+	return &Manager{songs: songs, tracker: tracker, queue: queue, cfg: cfg}
+}
+
+// InitialQueueTarget returns the configured queue depth to prepare before playback starts.
+func (m *Manager) InitialQueueTarget() int {
+	return m.initialQueueTarget()
+}
+
+// PrepareInitialQueue fills the queue to the configured startup depth.
+func (m *Manager) PrepareInitialQueue(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	targetDepth := m.initialQueueTarget()
+	if targetDepth <= 0 {
+		return 0, nil
+	}
+
+	totalSongs, err := m.songs.Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count songs: %w", err)
+	}
+	if totalSongs == 0 {
+		return 0, nil
+	}
+
+	before, err := m.queue.Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count queue before prepare: %w", err)
+	}
+	if before >= targetDepth {
+		return 0, nil
+	}
+
+	if err := m.fillQueue(ctx, targetDepth); err != nil {
+		return 0, err
+	}
+
+	after, err := m.queue.Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count queue after prepare: %w", err)
+	}
+	return after - before, nil
+}
+
+func (m *Manager) initialQueueTarget() int {
+	switch m.cfg.Fill.Strategy {
+	case FillManualOnly:
+		return 0
+	case FillAutoRefill:
+		return m.cfg.Fill.MinAhead
+	case FillPreload:
+		return m.cfg.Fill.PreloadSize
+	default:
+		return 0
+	}
 }
 
 // NextSong selects the next song according to the configured fill and shuffle strategies.
-// It records a play-start in history and returns the song + history entry.
-func (m *Manager) NextSong(ctx context.Context) (*models.Song, *models.HistoryEntry, error) {
+// It marks the song as played in the tracker and returns it.
+func (m *Manager) NextSong(ctx context.Context) (*models.Song, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -117,14 +172,14 @@ func (m *Manager) NextSong(ctx context.Context) (*models.Song, *models.HistoryEn
 	if m.cfg.Fill.Strategy == FillManualOnly {
 		item, err := m.queue.Dequeue(ctx)
 		if errors.Is(err, sql.ErrNoRows) || item == nil {
-			return nil, nil, ErrQueueEmpty
+			return nil, ErrQueueEmpty
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("dequeue: %w", err)
+			return nil, fmt.Errorf("dequeue: %w", err)
 		}
 		s, err := m.songs.GetByID(ctx, item.SongID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get queued song: %w", err)
+			return nil, fmt.Errorf("get queued song: %w", err)
 		}
 		song = s
 	} else {
@@ -134,44 +189,36 @@ func (m *Manager) NextSong(ctx context.Context) (*models.Song, *models.HistoryEn
 			var selErr error
 			song, selErr = m.autoSelect(ctx)
 			if selErr != nil {
-				return nil, nil, fmt.Errorf("auto-select: %w", selErr)
+				return nil, fmt.Errorf("auto-select: %w", selErr)
 			}
 		} else if err != nil {
-			return nil, nil, fmt.Errorf("dequeue: %w", err)
+			return nil, fmt.Errorf("dequeue: %w", err)
 		} else {
 			var getErr error
 			song, getErr = m.songs.GetByID(ctx, item.SongID)
 			if getErr != nil {
-				return nil, nil, fmt.Errorf("get queued song: %w", getErr)
+				return nil, fmt.Errorf("get queued song: %w", getErr)
 			}
 		}
 
 		switch m.cfg.Fill.Strategy {
 		case FillPreload:
 			if err := m.fillQueue(ctx, m.cfg.Fill.PreloadSize, song.ID); err != nil {
-				return nil, nil, fmt.Errorf("preload queue: %w", err)
+				return nil, fmt.Errorf("preload queue: %w", err)
 			}
 		case FillAutoRefill:
 			if err := m.fillQueue(ctx, m.cfg.Fill.MinAhead, song.ID); err != nil {
-				return nil, nil, fmt.Errorf("auto-refill queue: %w", err)
+				return nil, fmt.Errorf("auto-refill queue: %w", err)
 			}
 		}
 	}
 
-	entry := &models.HistoryEntry{
-		ID:       uuid.New().String(),
-		SongID:   song.ID,
-		PlayedAt: time.Now(),
-		Finished: false,
-	}
-	if err := m.history.RecordStart(ctx, entry); err != nil {
-		return nil, nil, fmt.Errorf("record history: %w", err)
-	}
-
-	return song, entry, nil
+	m.tracker.MarkPlayed(song.ID)
+	return song, nil
 }
 
 // autoSelect picks the next song according to the shuffle strategy.
+// Resets the tracker if all songs have been played (round-robin cycle complete).
 // Must be called with m.mu held.
 func (m *Manager) autoSelect(ctx context.Context) (*models.Song, error) {
 	allSongs, err := m.songs.List(ctx)
@@ -182,10 +229,24 @@ func (m *Manager) autoSelect(ctx context.Context) (*models.Song, error) {
 		return nil, fmt.Errorf("no songs available")
 	}
 
-	return m.pickByStrategy(ctx, allSongs)
+	// For non-random strategies, reset the tracker when all songs have been played.
+	if m.cfg.Shuffle.Strategy != ShuffleRandom {
+		allPlayed := true
+		for _, s := range allSongs {
+			if !m.tracker.HasPlayed(s.ID) {
+				allPlayed = false
+				break
+			}
+		}
+		if allPlayed {
+			m.tracker.Reset()
+		}
+	}
+
+	return m.pickByStrategy(allSongs)
 }
 
-func (m *Manager) pickByStrategy(ctx context.Context, songs []*models.Song) (*models.Song, error) {
+func (m *Manager) pickByStrategy(songs []*models.Song) (*models.Song, error) {
 	if len(songs) == 0 {
 		return nil, fmt.Errorf("no candidate songs available")
 	}
@@ -194,62 +255,36 @@ func (m *Manager) pickByStrategy(ctx context.Context, songs []*models.Song) (*mo
 	case ShuffleRandom:
 		return songs[rand.Intn(len(songs))], nil //nolint:gosec
 
-	case ShuffleRoundRobin:
-		// Play every song before repeating any; treat window = total songs.
-		recentIDs, err := m.history.GetRecentSongIDs(ctx, len(songs))
-		if err != nil {
-			return nil, fmt.Errorf("get recent songs: %w", err)
+	case ShuffleRoundRobin, ShuffleWeightedHistory:
+		// Play every song before repeating any (bloom filter cycle).
+		unplayed := filterUnplayed(songs, m.tracker)
+		if len(unplayed) == 0 {
+			unplayed = songs
 		}
-		return m.pickExcluding(songs, setOf(recentIDs)), nil
+		return unplayed[rand.Intn(len(unplayed))], nil //nolint:gosec
 
 	case ShuffleLeastPlayed:
-		counts, err := m.history.GetSongPlayCounts(ctx)
-		if err != nil {
-			return nil, err
+		// Prefer unplayed songs; fall back to random when all have been played.
+		unplayed := filterUnplayed(songs, m.tracker)
+		if len(unplayed) > 0 {
+			return unplayed[rand.Intn(len(unplayed))], nil //nolint:gosec
 		}
-		minCnt := int(^uint(0) >> 1)
-		for _, s := range songs {
-			if c := counts[s.ID]; c < minCnt {
-				minCnt = c
-			}
-		}
-		var candidates []*models.Song
-		for _, s := range songs {
-			if counts[s.ID] == minCnt {
-				candidates = append(candidates, s)
-			}
-		}
-		return candidates[rand.Intn(len(candidates))], nil //nolint:gosec
+		return songs[rand.Intn(len(songs))], nil //nolint:gosec
 
-	default: // weighted_history
-		window := m.cfg.Shuffle.RecentWindow
-		if window <= 0 {
-			window = len(songs) / 2
-			if window > 20 {
-				window = 20
-			}
-		}
-		recentIDs, err := m.history.GetRecentSongIDs(ctx, window)
-		if err != nil {
-			return nil, fmt.Errorf("get recent songs: %w", err)
-		}
-		return m.pickExcluding(songs, setOf(recentIDs)), nil
+	default:
+		return songs[rand.Intn(len(songs))], nil //nolint:gosec
 	}
 }
 
-// pickExcluding selects a random song not in the exclusion set;
-// falls back to full list if every song is excluded.
-func (m *Manager) pickExcluding(all []*models.Song, exclude map[string]struct{}) *models.Song {
-	candidates := make([]*models.Song, 0, len(all))
-	for _, s := range all {
-		if _, skip := exclude[s.ID]; !skip {
-			candidates = append(candidates, s)
+// filterUnplayed returns the subset of songs the tracker has not seen.
+func filterUnplayed(songs []*models.Song, t PlayedTracker) []*models.Song {
+	out := make([]*models.Song, 0, len(songs))
+	for _, s := range songs {
+		if !t.HasPlayed(s.ID) {
+			out = append(out, s)
 		}
 	}
-	if len(candidates) == 0 {
-		candidates = all
-	}
-	return candidates[rand.Intn(len(candidates))] //nolint:gosec
+	return out
 }
 
 // fillQueue refills the queue up to targetDepth using the shuffle strategy.
@@ -316,15 +351,7 @@ func (m *Manager) autoSelectExcluding(ctx context.Context, queued map[string]str
 		return nil, nil
 	}
 
-	return m.pickByStrategy(ctx, filtered)
-}
-
-func setOf(ids []string) map[string]struct{} {
-	m := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		m[id] = struct{}{}
-	}
-	return m
+	return m.pickByStrategy(filtered)
 }
 
 // AddToQueue validates that a song exists and appends it to the playback queue.
@@ -347,18 +374,13 @@ func (m *Manager) AddToQueue(ctx context.Context, songID string, source models.Q
 	return m.queue.Enqueue(ctx, item)
 }
 
-// MarkSongFinished records that the song identified by historyID finished playing.
-func (m *Manager) MarkSongFinished(ctx context.Context, historyID string) error {
-	return m.history.MarkFinished(ctx, historyID, time.Now())
-}
-
 // ListQueue returns the current contents of the playback queue.
 func (m *Manager) ListQueue(ctx context.Context) ([]*models.QueueItem, error) {
 	return m.queue.List(ctx)
 }
 
 // SkipCurrent advances playback and returns the next selected song.
-func (m *Manager) SkipCurrent(ctx context.Context) (*models.Song, *models.HistoryEntry, error) {
+func (m *Manager) SkipCurrent(ctx context.Context) (*models.Song, error) {
 	return m.NextSong(ctx)
 }
 

@@ -29,6 +29,14 @@ type QueueManager interface {
 // OnNewSong is called after a newly discovered song is registered.
 type OnNewSong func(song *models.Song)
 
+// ScanSummary describes the startup folder scan.
+type ScanSummary struct {
+	MusicFiles     int
+	NewlyIndexed   int
+	AlreadyIndexed int
+	WatchedDirs    int
+}
+
 // Watcher monitors a directory tree for new audio files and registers them.
 type Watcher struct {
 	dir        string
@@ -72,23 +80,37 @@ func New(dir string, extensions []string, songRepo SongRepository, queueMgr Queu
 
 // ScanExisting walks the entire music directory tree and inserts any audio files
 // not yet tracked in the DB. Does NOT add songs to the queue.
-func (w *Watcher) ScanExisting(ctx context.Context) error {
-	return filepath.WalkDir(w.dir, func(path string, d fs.DirEntry, err error) error {
+func (w *Watcher) ScanExisting(ctx context.Context) (*ScanSummary, error) {
+	summary := &ScanSummary{}
+	err := filepath.WalkDir(w.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || ctx.Err() != nil {
 			return err
 		}
 		if d.IsDir() {
 			if path != w.dir {
 				// Watch every subdirectory so we catch new files in nested dirs.
-				_ = w.fsWatcher.Add(path)
+				if err := w.fsWatcher.Add(path); err == nil {
+					summary.WatchedDirs++
+				}
 			}
 			return nil
 		}
 		if !w.isMusicFile(path) {
 			return nil
 		}
-		return w.registerFile(ctx, path, false)
+		summary.MusicFiles++
+		_, created, err := w.registerFile(ctx, path, false)
+		if err != nil {
+			return err
+		}
+		if created {
+			summary.NewlyIndexed++
+		} else {
+			summary.AlreadyIndexed++
+		}
+		return nil
 	})
+	return summary, err
 }
 
 // Start watches the directory tree for new files. Blocks until ctx is done.
@@ -124,7 +146,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 				continue
 			}
 
-			if err := w.registerFile(ctx, event.Name, true); err != nil {
+			if _, _, err := w.registerFile(ctx, event.Name, true); err != nil {
 				w.logger.Printf("register %s: %v", event.Name, err)
 			}
 
@@ -154,7 +176,7 @@ func (w *Watcher) scanDir(ctx context.Context, dir string, addToQueue bool) erro
 		if !w.isMusicFile(path) {
 			continue
 		}
-		if err := w.registerFile(ctx, path, addToQueue); err != nil {
+		if _, _, err := w.registerFile(ctx, path, addToQueue); err != nil {
 			w.logger.Printf("register %s: %v", path, err)
 		}
 	}
@@ -162,18 +184,18 @@ func (w *Watcher) scanDir(ctx context.Context, dir string, addToQueue bool) erro
 }
 
 // registerFile inserts a new song record and optionally queues it.
-func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool) error {
+func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool) (*models.Song, bool, error) {
 	exists, err := w.songRepo.ExistsByPath(ctx, path)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if exists {
-		return nil
+		return nil, false, nil
 	}
 
 	stat, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 
 	m := meta.Extract(path)
@@ -191,7 +213,7 @@ func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool
 	}
 
 	if err := w.songRepo.Create(ctx, song); err != nil {
-		return err
+		return nil, false, err
 	}
 	w.logger.Printf("indexed: %s (%.0fs)", song.Title, song.DurationSecs)
 
@@ -204,7 +226,7 @@ func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool
 		}
 	}
 
-	return nil
+	return song, true, nil
 }
 
 func (w *Watcher) isMusicFile(path string) bool {

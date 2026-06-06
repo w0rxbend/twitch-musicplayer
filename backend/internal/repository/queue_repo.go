@@ -20,7 +20,7 @@ type QueueRepository interface {
 
 const queueSongJoin = `
 SELECT q.id, q.song_id, q.position, q.source, q.added_at,
-       s.` + songFields + `
+       ` + qualifiedSongFields + `
 FROM queue q
 JOIN songs s ON s.id = q.song_id`
 

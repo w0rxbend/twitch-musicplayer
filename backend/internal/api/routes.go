@@ -7,14 +7,7 @@ import (
 )
 
 // RegisterRoutes mounts all v1 resource routes onto the provided chi router.
-//
-// Expected handler arguments:
-//
-//	songs   – constructed via NewSongsHandler
-//	queue   – constructed via NewQueueHandler
-//	history – constructed via NewHistoryHandler
-//	player  – constructed via NewPlayerHandler
-func RegisterRoutes(r chi.Router, songs *SongsHandler, queue *QueueHandler, history *HistoryHandler, player *PlayerHandler) {
+func RegisterRoutes(r chi.Router, songs *SongsHandler, queue *QueueHandler, player *PlayerHandler) {
 	r.Route("/v1", func(r chi.Router) {
 		// Songs
 		r.Get("/songs", songs.List)
@@ -29,17 +22,14 @@ func RegisterRoutes(r chi.Router, songs *SongsHandler, queue *QueueHandler, hist
 		r.Post("/queue:skip", queue.Skip)
 		r.Post("/queue:clear", queue.Clear)
 
-		// History
-		r.Get("/history", history.List)
-
 		// Player
 		r.Get("/player", player.State)
 	})
 }
 
 // RegisterRoutesHTTP is a convenience wrapper for use with a plain http.Handler.
-func RegisterRoutesHTTP(songs *SongsHandler, queue *QueueHandler, history *HistoryHandler, player *PlayerHandler) http.Handler {
+func RegisterRoutesHTTP(songs *SongsHandler, queue *QueueHandler, player *PlayerHandler) http.Handler {
 	r := chi.NewRouter()
-	RegisterRoutes(r, songs, queue, history, player)
+	RegisterRoutes(r, songs, queue, player)
 	return r
 }

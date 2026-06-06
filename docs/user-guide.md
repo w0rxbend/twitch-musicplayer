@@ -36,7 +36,7 @@ Press `T` to open the tweaks panel. Available settings include:
 - Particle density.
 - Overlay visibility.
 
-The bottom-left now-playing area and visible load/microphone/play/tweaks buttons have intentionally been removed.
+The visible load/microphone/play buttons have intentionally been removed. The top-right chrome shows the current backend-provided song name under the clock.
 
 ## Logo Overlay
 
@@ -48,6 +48,8 @@ http://localhost:3000/logo-overlay
 ```
 
 The overlay uses the same backend WebSocket/audio playback path as the main page, but renders only a transparent Pixi canvas with fluid circular audio-reactive lines. It is intended for OBS/browser-source overlays and other compositing workflows.
+
+Overlay routes try to start audio automatically for OBS browser sources. The main page keeps normal browser autoplay protection unless opened with `?autoplay=1` or built with `VITE_AUTO_START_AUDIO=true`.
 
 ## Queue Control
 

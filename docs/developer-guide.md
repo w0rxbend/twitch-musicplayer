@@ -90,7 +90,7 @@ The frontend intentionally supports only backend streams:
 - No local file picker.
 - No microphone input.
 - No visible play/pause button.
-- No now-playing metadata block.
+- The top-right chrome displays the current backend-provided song name under the clock.
 
 This keeps playback state aligned with the backend protocol and avoids competing local audio modes.
 

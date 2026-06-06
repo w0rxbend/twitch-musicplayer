@@ -17,7 +17,7 @@ import (
 type queueManager interface {
 	AddToQueue(ctx context.Context, songID string, source models.QueueSource) error
 	ListQueue(ctx context.Context) ([]*models.QueueItem, error)
-	SkipCurrent(ctx context.Context) (*models.Song, *models.HistoryEntry, error)
+	SkipCurrent(ctx context.Context) (*models.Song, error)
 	ClearQueue(ctx context.Context) error
 }
 
@@ -28,12 +28,6 @@ type queueRepo interface {
 
 type queueBroadcaster interface {
 	Broadcast(msg websocket.Message)
-}
-
-// playSongResponse is the response body returned by the Skip endpoint.
-type playSongResponse struct {
-	Song         *models.Song         `json:"song"`
-	HistoryEntry *models.HistoryEntry `json:"history_entry,omitempty"`
 }
 
 // addToQueueRequest is the request body for POST /v1/queue.
@@ -93,12 +87,10 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 	// Return the newly queued item by fetching the updated queue tail.
 	items, err := h.mgr.ListQueue(r.Context())
 	if err != nil || len(items) == 0 {
-		// Enqueue succeeded but we can't read back — return minimal 201.
 		w.WriteHeader(http.StatusCreated)
 		return
 	}
 
-	// The last item in the queue is the one we just added.
 	h.broadcastQueueUpdated(r.Context(), "song_added")
 	writeJSON(w, http.StatusCreated, items[len(items)-1])
 }
@@ -116,16 +108,13 @@ func (h *QueueHandler) Remove(w http.ResponseWriter, r *http.Request) {
 
 // Skip handles POST /v1/queue:skip.
 func (h *QueueHandler) Skip(w http.ResponseWriter, r *http.Request) {
-	song, entry, err := h.mgr.SkipCurrent(r.Context())
+	song, err := h.mgr.SkipCurrent(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to skip current song")
 		return
 	}
 	h.broadcastQueueUpdated(r.Context(), "skipped")
-	writeJSON(w, http.StatusOK, playSongResponse{
-		Song:         song,
-		HistoryEntry: entry,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"song": song})
 }
 
 // Clear handles POST /v1/queue:clear.

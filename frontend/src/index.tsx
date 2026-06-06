@@ -3,6 +3,15 @@ import { App } from './App';
 import { OverlayApp } from './OverlayApp';
 import './styles/global.css';
 
-const isOverlay = ['/overlay', '/logo-overlay'].includes(window.location.pathname);
+const pathname = window.location.pathname;
+const isOverlay = pathname === '/overlay';
+const isLogoOverlay = ['/logo', '/logo-overlay'].includes(pathname);
 
-render(() => isOverlay ? <OverlayApp /> : <App />, document.getElementById('root')!);
+render(
+  () => {
+    if (isLogoOverlay) return <OverlayApp transparent showBackground={false} />;
+    if (isOverlay) return <OverlayApp />;
+    return <App />;
+  },
+  document.getElementById('root')!,
+);

@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${MUSIC_DIR:-./music}:/music:ro
+      - lofi-data:/data
+    environment:
+      PORT: "8080"
+      MUSIC_DIR: /music
+      BLUEPRINT_DB_URL: /data/lofi-radio.db
+      BASE_URL: http://localhost:8080
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:8080}
+        VITE_AUTO_START_AUDIO: ${VITE_AUTO_START_AUDIO:-false}
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  lofi-data:
