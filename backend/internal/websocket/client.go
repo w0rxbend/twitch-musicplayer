@@ -137,6 +137,10 @@ func (c *Client) handleMessage(msg Message) {
 		// Song is already marked played when it starts; just request the next one.
 		c.sendNextSong(ctx)
 
+	case MsgPeekNext:
+		// Client wants to prebuffer the next song without dequeuing it.
+		c.sendPrebuffer(ctx)
+
 	case MsgHeartbeat:
 		ack := Message{Type: MsgHeartbeatAck}
 		select {
@@ -203,6 +207,32 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	}
 	if queueMsg, encErr := Encode(MsgQueueUpdated, QueueUpdatedPayload{QueueDepth: queueDepth, Reason: "song_started"}); encErr == nil {
 		c.hub.Broadcast(queueMsg)
+	}
+}
+
+// sendPrebuffer peeks at the front of the queue and sends the next song's URL to this
+// client for prebuffering. It does NOT dequeue or update shared state.
+func (c *Client) sendPrebuffer(ctx context.Context) {
+	items, err := c.queueMgr.ListQueue(ctx)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	first := items[0]
+	if first.Song == nil {
+		return
+	}
+	payload := PlaySongPayload{
+		Song:      *first.Song,
+		StreamURL: c.baseURL + "/v1/songs/" + first.Song.ID + "/content",
+		HistoryID: "", // intentionally empty — this is a prebuffer hint only
+	}
+	msg, err := Encode(MsgPrebufferSong, payload)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- msg:
+	default:
 	}
 }
 

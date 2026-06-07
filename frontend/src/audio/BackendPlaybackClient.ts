@@ -3,8 +3,10 @@ import type { AudioEngine } from './AudioEngine';
 type MessageType =
   | 'need_song'
   | 'song_finished'
+  | 'peek_next'
   | 'heartbeat'
   | 'play_song'
+  | 'prebuffer_song'
   | 'queue_updated'
   | 'error'
   | 'heartbeat_ack'
@@ -50,8 +52,10 @@ const maxOutboxMessages = 20;
 const messageTypes = new Set<MessageType>([
   'need_song',
   'song_finished',
+  'peek_next',
   'heartbeat',
   'play_song',
+  'prebuffer_song',
   'queue_updated',
   'error',
   'heartbeat_ack',
@@ -178,11 +182,16 @@ export class BackendPlaybackClient {
         this.awaitingSong = false;
         await this.play(msg.payload);
         break;
+      case 'prebuffer_song':
+        // Response to peek_next: buffer the next track on the inactive channel. No dequeue,
+        // no state change — when playStream is called for this URL it skips re-loading.
+        if (!isPlaySongPayload(msg.payload)) return;
+        this.audio.preloadNext(resolveStreamURL(msg.payload.stream_url));
+        break;
       case 'queue_updated':
         if (!this.current && !this.pendingPlay && !this.awaitingSong) this.requestSong();
         break;
       case 'skip_now':
-        // Server requests an immediate track change (e.g. management UI "play now").
         this.current = null;
         window.clearTimeout(this.streamRetryTimer);
         window.clearTimeout(this.errorRetryTimer);
@@ -211,6 +220,8 @@ export class BackendPlaybackClient {
       await this.audio.playStream(resolveStreamURL(payload.stream_url), songName, {
         onEnded: () => this.finishCurrent(payload),
         onError: () => this.retryStream(payload),
+        onPrefetch: () => this.handlePrefetch(payload),
+        onNearEnd: () => this.handleNearEnd(payload),
       });
       this.current = payload;
       this.pendingPlay = null;
@@ -220,6 +231,21 @@ export class BackendPlaybackClient {
     } catch {
       this.onStatus?.(this.audio.allowAutoplay ? 'audio autoplay blocked' : 'click anywhere to start audio');
     }
+  }
+
+  // Called ~15s before end: request the next song URL for prebuffering (no dequeue).
+  private handlePrefetch(payload: PlaySongPayload) {
+    if (this.current?.history_id !== payload.history_id && this.pendingPlay?.history_id !== payload.history_id) return;
+    this.queueOrSend({ type: 'peek_next' });
+  }
+
+  // Called ~3s before end: trigger the crossfade by sending song_finished early.
+  // The server responds with play_song for the next track; that handler calls play()
+  // which detects the pre-buffered URL on the inactive channel and starts near-instantly.
+  private handleNearEnd(payload: PlaySongPayload) {
+    if (this.current?.history_id !== payload.history_id && this.pendingPlay?.history_id !== payload.history_id) return;
+    this.awaitingSong = true; // prevent queue_updated from firing a duplicate need_song
+    this.finishCurrent(payload);
   }
 
   private finishCurrent(payload: PlaySongPayload) {

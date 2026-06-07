@@ -4,6 +4,10 @@ import type { AudioBands } from '../viz/types';
 const BINS = 512;
 const DEFAULT_FADE_OUT_MS = 2500;
 const DEFAULT_FADE_IN_MS = 2500;
+// Seconds before end to fire onNearEnd (triggers actual crossfade): fade + 0.5s network margin
+const NEAR_END_THRESHOLD_SECS = DEFAULT_FADE_OUT_MS / 1000 + 0.5; // 3.0s
+// Seconds before end to fire onPrefetch (triggers peek_next + audio preload)
+const PREFETCH_THRESHOLD_SECS = 15;
 const userGestureRequiredMessage = 'audio requires a user gesture';
 
 interface AudioEngineOptions {
@@ -19,6 +23,7 @@ interface PlaybackChannel {
   audioEl: HTMLAudioElement;
   mediaSource: MediaElementAudioSourceNode;
   gain: GainNode;
+  _nearEndCleanup: (() => void) | null;
 }
 
 export class AudioEngine {
@@ -102,7 +107,7 @@ export class AudioEngine {
     mediaSource.connect(gain);
     gain.connect(this.analyser);
 
-    return { audioEl, mediaSource, gain };
+    return { audioEl, mediaSource, gain, _nearEndCleanup: null };
   }
 
   private _nextChannel(): PlaybackChannel {
@@ -152,6 +157,8 @@ export class AudioEngine {
 
   private _stopChannel(channel: PlaybackChannel | null) {
     if (!channel) return;
+    channel._nearEndCleanup?.();
+    channel._nearEndCleanup = null;
     channel.audioEl.pause();
     channel.audioEl.onended = null;
     channel.audioEl.onerror = null;
@@ -160,16 +167,41 @@ export class AudioEngine {
     this._setChannelGain(channel, 0);
   }
 
+  // Loads the next song's URL on the inactive channel for buffering without playing.
+  preloadNext(url: string): void {
+    if (!this.ctx) return;
+    try {
+      const ch = this._nextChannel();
+      if (ch.audioEl.src === url) return;
+      ch._nearEndCleanup?.();
+      ch._nearEndCleanup = null;
+      ch.audioEl.pause();
+      ch.audioEl.onended = null;
+      ch.audioEl.onerror = null;
+      ch.audioEl.src = url;
+      ch.audioEl.load();
+    } catch { /* ignore */ }
+  }
+
   async playStream(
     streamUrl: string,
     sourceName: string,
-    handlers: { onEnded?: () => void; onError?: (error: Event) => void } = {},
+    handlers: {
+      onEnded?: () => void;
+      onError?: (error: Event) => void;
+      onPrefetch?: () => void;   // fired PREFETCH_THRESHOLD_SECS before end — request next song URL
+      onNearEnd?: () => void;    // fired NEAR_END_THRESHOLD_SECS before end — start crossfade
+    } = {},
   ): Promise<void> {
     await this.resume();
     const outgoing = this._activeChannel;
     const incoming = this._nextChannel();
     const wasPlaying = !!(outgoing && this.playing && !outgoing.audioEl.paused);
     const hadSource = this.mode === 'backend' && !!outgoing?.audioEl.src;
+
+    // Clean up any stale near-end listener on the incoming channel.
+    incoming._nearEndCleanup?.();
+    incoming._nearEndCleanup = null;
 
     this._setChannelGain(incoming, 0);
     incoming.audioEl.onended = null;
@@ -178,8 +210,13 @@ export class AudioEngine {
     incoming.audioEl.loop = false;
     incoming.audioEl.onended = handlers.onEnded ?? null;
     incoming.audioEl.onerror = handlers.onError ? event => handlers.onError?.(event instanceof Event ? event : new Event('error')) : null;
-    incoming.audioEl.src = streamUrl;
-    incoming.audioEl.load();
+
+    // Skip reload if this channel already has the correct URL buffered (e.g. after preloadNext).
+    if (incoming.audioEl.src !== streamUrl) {
+      incoming.audioEl.src = streamUrl;
+      incoming.audioEl.load();
+    }
+
     this.mode = 'backend';
     this.hasUserSource = true;
     this.sourceName = sourceName;
@@ -187,6 +224,32 @@ export class AudioEngine {
     try {
       await incoming.audioEl.play();
       this.playing = true;
+
+      // Wire up near-end monitoring (prefetch + crossfade triggers).
+      if (handlers.onPrefetch || handlers.onNearEnd) {
+        const el = incoming.audioEl;
+        let prefetchFired = false;
+        let nearEndFired = false;
+        const timeHandler = () => {
+          if (nearEndFired) return;
+          const { duration, currentTime } = el;
+          if (!duration || !isFinite(duration) || currentTime < 2.0) return;
+          const remaining = duration - currentTime;
+          if (!prefetchFired && remaining < PREFETCH_THRESHOLD_SECS) {
+            prefetchFired = true;
+            handlers.onPrefetch?.();
+          }
+          if (remaining < NEAR_END_THRESHOLD_SECS) {
+            nearEndFired = true;
+            el.removeEventListener('timeupdate', timeHandler);
+            incoming._nearEndCleanup = null;
+            handlers.onNearEnd?.();
+          }
+        };
+        el.addEventListener('timeupdate', timeHandler);
+        incoming._nearEndCleanup = () => el.removeEventListener('timeupdate', timeHandler);
+      }
+
       const fadeIn = this._fadeChannelTo(incoming, 1, DEFAULT_FADE_IN_MS);
       const fadeOut = wasPlaying ? this._fadeChannelTo(outgoing, 0, DEFAULT_FADE_OUT_MS) : Promise.resolve();
       await Promise.all([fadeIn, fadeOut]);
@@ -315,6 +378,8 @@ export class AudioEngine {
     this.sourceName = '';
 
     if (this._channelA) {
+      this._channelA._nearEndCleanup?.();
+      this._channelA._nearEndCleanup = null;
       this._channelA.audioEl.pause();
       this._channelA.audioEl.onended = null;
       this._channelA.audioEl.onerror = null;
@@ -324,6 +389,8 @@ export class AudioEngine {
       this._channelA.gain.disconnect();
     }
     if (this._channelB) {
+      this._channelB._nearEndCleanup?.();
+      this._channelB._nearEndCleanup = null;
       this._channelB.audioEl.pause();
       this._channelB.audioEl.onended = null;
       this._channelB.audioEl.onerror = null;

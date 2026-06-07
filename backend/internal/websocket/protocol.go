@@ -11,17 +11,19 @@ const (
 	MsgNeedSong     = "need_song"     // ready, send me a song
 	MsgSongFinished = "song_finished" // payload: SongFinishedPayload
 	MsgHeartbeat    = "heartbeat"
+	MsgPeekNext     = "peek_next" // peek at next queued song for prebuffering (no dequeue)
 )
 
 // Server -> Client message types
 const (
-	MsgPlaySong     = "play_song"     // payload: PlaySongPayload (unicast to player)
-	MsgQueueUpdated = "queue_updated" // payload: QueueUpdatedPayload (broadcast)
-	MsgNowPlaying   = "now_playing"   // payload: NowPlayingPayload (broadcast, for management UIs)
-	MsgSkipNow      = "skip_now"      // no payload; tells audio clients to skip immediately (broadcast)
-	MsgError        = "error"         // payload: ErrorPayload
-	MsgHeartbeatAck = "heartbeat_ack"
-	MsgState        = "state" // sent on connect: PlayerState
+	MsgPlaySong      = "play_song"      // payload: PlaySongPayload (unicast to player)
+	MsgPrebufferSong = "prebuffer_song" // response to peek_next: preload this (unicast, no dequeue)
+	MsgQueueUpdated  = "queue_updated"  // payload: QueueUpdatedPayload (broadcast)
+	MsgNowPlaying    = "now_playing"    // payload: NowPlayingPayload (broadcast, for management UIs)
+	MsgSkipNow       = "skip_now"       // no payload; tells audio clients to skip immediately (broadcast)
+	MsgError         = "error"          // payload: ErrorPayload
+	MsgHeartbeatAck  = "heartbeat_ack"
+	MsgState         = "state" // sent on connect: PlayerState
 )
 
 // Message is the envelope for all WebSocket messages.
