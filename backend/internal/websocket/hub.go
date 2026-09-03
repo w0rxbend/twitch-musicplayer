@@ -34,32 +34,43 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 		case c := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[c]; ok {
-				delete(h.clients, c)
-				close(c.send)
-			}
-			h.mu.Unlock()
+			h.drop(c)
 
 		case msg := <-h.broadcast:
-			h.mu.RLock()
-			// Collect clients to remove after releasing the read lock.
-			var dead []*Client
-			for c := range h.clients {
-				select {
-				case c.send <- msg:
-				default:
-					// Client's send buffer is full — mark for removal.
-					dead = append(dead, c)
-				}
-			}
-			h.mu.RUnlock()
-
-			// Unregister overflowed clients.
-			for _, c := range dead {
-				h.Unregister(c)
-			}
+			h.deliver(msg)
 		}
+	}
+}
+
+// deliver fans msg out to every client, dropping any whose send buffer has
+// filled up (a peer that cannot keep up is treated as gone).
+func (h *Hub) deliver(msg Message) {
+	h.mu.RLock()
+	var stalled []*Client
+	for c := range h.clients {
+		if !c.trySend(msg) {
+			stalled = append(stalled, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	// Removed inline rather than via h.unregister: Run is the only reader of
+	// that channel, so sending to it from here would deadlock the hub once the
+	// channel buffer filled.
+	for _, c := range stalled {
+		h.drop(c)
+	}
+}
+
+// drop removes a client from the hub and signals its write pump to finish.
+func (h *Hub) drop(c *Client) {
+	h.mu.Lock()
+	_, known := h.clients[c]
+	delete(h.clients, c)
+	h.mu.Unlock()
+
+	if known {
+		c.close()
 	}
 }
 
@@ -77,7 +88,7 @@ func (h *Hub) Register(c *Client) {
 	h.register <- c
 }
 
-// Unregister removes a client from the hub and closes its send channel.
+// Unregister removes a client from the hub and stops its write pump.
 func (h *Hub) Unregister(c *Client) {
 	h.unregister <- c
 }

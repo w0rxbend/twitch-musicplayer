@@ -34,6 +34,7 @@ var upgrader = ws.Upgrader{
 type QueueManager interface {
 	NextSong(ctx context.Context) (*models.Song, error)
 	ListQueue(ctx context.Context) ([]*models.QueueItem, error)
+	TotalSongs(ctx context.Context) (int, error)
 }
 
 // Client represents a single connected WebSocket peer.
@@ -46,6 +47,14 @@ type Client struct {
 	stateTracker *player.StateTracker
 	currentSong  *models.Song
 	mu           sync.Mutex
+
+	// closed is closed exactly once, when the hub drops this client. The send
+	// channel itself is deliberately never closed: the read pump, the hub's
+	// broadcast loop and the initial-state sender may all still be mid-send,
+	// and a send on a closed channel panics even inside a select with a
+	// default. Signalling through a separate channel lets senders bail safely.
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 // NewClient constructs a Client. Call ServeWS instead of this directly.
@@ -57,6 +66,33 @@ func NewClient(hub *Hub, conn *ws.Conn, queueMgr QueueManager, baseURL string, s
 		queueMgr:     queueMgr,
 		baseURL:      baseURL,
 		stateTracker: st,
+		closed:       make(chan struct{}),
+	}
+}
+
+// close marks the client as gone and wakes its write pump. Safe to call
+// repeatedly and from any goroutine.
+func (c *Client) close() {
+	c.closeOnce.Do(func() { close(c.closed) })
+}
+
+// trySend queues msg for delivery without ever blocking the caller. It reports
+// false when the client is already closed or its send buffer is full.
+func (c *Client) trySend(msg Message) bool {
+	// Checked in two steps on purpose. A single select listing both cases
+	// would pick at random whenever both are ready, so a closed client with a
+	// free buffer slot would still accept messages.
+	select {
+	case <-c.closed:
+		return false
+	default:
+	}
+
+	select {
+	case c.send <- msg:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -72,25 +108,32 @@ func ServeWS(hub *Hub, queueMgr QueueManager, baseURL string, st *player.StateTr
 	c := NewClient(hub, conn, queueMgr, baseURL, st)
 	hub.Register(c)
 
-	// Send initial state: current song + queue depth.
-	go func() {
-		items, err := queueMgr.ListQueue(r.Context())
-		queueDepth := 0
-		if err == nil {
-			queueDepth = len(items)
-		}
-		state := models.PlayerState{
-			CurrentSong: st.GetCurrentSong(),
-			QueueLength: queueDepth,
-		}
-		msg, encErr := Encode(MsgState, state)
-		if encErr == nil {
-			c.send <- msg
-		}
-	}()
+	// Queue the initial snapshot before the pumps start, so it is the first
+	// frame the peer receives. The request context is not used here: it is
+	// cancelled as soon as ServeWS returns, which would abort these lookups.
+	if msg, encErr := Encode(MsgState, c.snapshotState(context.Background())); encErr == nil {
+		c.trySend(msg)
+	}
 
 	go c.writePump()
 	go c.readPump()
+}
+
+// snapshotState builds the PlayerState sent to a peer on connect. Lookup
+// failures degrade to zero counts rather than withholding the whole snapshot.
+func (c *Client) snapshotState(ctx context.Context) models.PlayerState {
+	state := models.PlayerState{CurrentSong: c.stateTracker.GetCurrentSong()}
+	if items, err := c.queueMgr.ListQueue(ctx); err == nil {
+		state.QueueLength = len(items)
+	} else {
+		log.Printf("websocket initial state: list queue: %v", err)
+	}
+	if total, err := c.queueMgr.TotalSongs(ctx); err == nil {
+		state.TotalSongs = total
+	} else {
+		log.Printf("websocket initial state: count songs: %v", err)
+	}
+	return state
 }
 
 // readPump reads incoming messages from the WebSocket connection.
@@ -142,11 +185,7 @@ func (c *Client) handleMessage(msg Message) {
 		c.sendPrebuffer(ctx)
 
 	case MsgHeartbeat:
-		ack := Message{Type: MsgHeartbeatAck}
-		select {
-		case c.send <- ack:
-		default:
-		}
+		c.trySend(Message{Type: MsgHeartbeatAck})
 
 	default:
 		log.Printf("unknown message type: %q", msg.Type)
@@ -160,12 +199,8 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	song, err := c.queueMgr.NextSong(ctx)
 	if err != nil {
 		log.Printf("next song error: %v", err)
-		errMsg, encErr := Encode(MsgError, ErrorPayload{Message: err.Error()})
-		if encErr == nil {
-			select {
-			case c.send <- errMsg:
-			default:
-			}
+		if errMsg, encErr := Encode(MsgError, ErrorPayload{Message: err.Error()}); encErr == nil {
+			c.trySend(errMsg)
 		}
 		return
 	}
@@ -175,7 +210,7 @@ func (c *Client) sendNextSong(ctx context.Context) {
 
 	payload := PlaySongPayload{
 		Song:       *song,
-		StreamURL:  c.baseURL + "/v1/songs/" + song.ID + "/content",
+		StreamURL:  c.streamURL(song.ID),
 		HistoryID:  uuid.New().String(),
 		QueueDepth: queueDepth,
 	}
@@ -195,10 +230,8 @@ func (c *Client) sendNextSong(ctx context.Context) {
 	c.currentSong = song
 	c.mu.Unlock()
 
-	select {
-	case c.send <- playMsg:
-	default:
-		log.Printf("send buffer full, dropping play_song for client")
+	if !c.trySend(playMsg) {
+		log.Printf("send buffer full or client closed, dropping play_song")
 	}
 
 	// Broadcast to all peers so management UIs get live updates.
@@ -223,20 +256,23 @@ func (c *Client) sendPrebuffer(ctx context.Context) {
 	}
 	payload := PlaySongPayload{
 		Song:      *first.Song,
-		StreamURL: c.baseURL + "/v1/songs/" + first.Song.ID + "/content",
+		StreamURL: c.streamURL(first.Song.ID),
 		HistoryID: "", // intentionally empty — this is a prebuffer hint only
 	}
 	msg, err := Encode(MsgPrebufferSong, payload)
 	if err != nil {
 		return
 	}
-	select {
-	case c.send <- msg:
-	default:
-	}
+	c.trySend(msg)
 }
 
-// writePump drains the client's send channel and writes messages to the connection.
+// streamURL builds the absolute URL a client fetches audio bytes from.
+func (c *Client) streamURL(songID string) string {
+	return c.baseURL + "/v1/songs/" + songID + "/content"
+}
+
+// writePump drains the client's send channel and writes messages to the
+// connection. It exits when the hub closes the client or a write fails.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -246,13 +282,8 @@ func (c *Client) writePump() {
 
 	for {
 		select {
-		case msg, ok := <-c.send:
+		case msg := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				c.conn.WriteMessage(ws.CloseMessage, []byte{})
-				return
-			}
-
 			if err := c.conn.WriteJSON(msg); err != nil {
 				log.Printf("websocket write error: %v", err)
 				return
@@ -263,6 +294,11 @@ func (c *Client) writePump() {
 			if err := c.conn.WriteMessage(ws.PingMessage, nil); err != nil {
 				return
 			}
+
+		case <-c.closed:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			c.conn.WriteMessage(ws.CloseMessage, []byte{}) //nolint:errcheck
+			return
 		}
 	}
 }
