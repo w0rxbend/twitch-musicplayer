@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Build and publish the images to Docker Hub.
+#
+#   docker login
+#   IMAGE_TAG=0.1.0 docker compose -f docker-compose.build.yml build
+#   IMAGE_TAG=0.1.0 docker compose -f docker-compose.build.yml push
+#
+# That builds for this machine's architecture. To publish images that also run
+# on Apple Silicon and Raspberry Pi, register the emulators once, then use
+# Buildx Bake, which reads this same file:
+#
+#   docker run --privileged --rm tonistiigi/binfmt --install all   # once
+#   docker buildx create --use --name lofi                          # once
+#   IMAGE_TAG=0.1.0 docker buildx bake -f docker-compose.build.yml \
+#       --set '*.platform=linux/amd64,linux/arm64' --push
+#
+# The platform list is deliberately not baked into this file: without the
+# emulators installed, a plain `docker compose build` fails with
+# "exec format error" on the foreign architecture.
+#
+# Set DOCKERHUB_NAMESPACE to your Docker Hub account name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: lofi-radio-build
+
+services:
+  backend:
+    image: ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      cache_from:
+        - ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-backend:latest
+      labels:
+        org.opencontainers.image.title: lofi-radio-backend
+        org.opencontainers.image.description: Backend DJ for the Twitch lofi radio — indexes MP3s, picks tracks, streams audio.
+        org.opencontainers.image.source: https://github.com/w0rxbend/twitch-musicplayer
+
+  frontend:
+    image: ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Deliberately empty. A published image must not carry one deployment's
+        # backend URL, so it resolves at runtime from BACKEND_URL instead.
+        VITE_BACKEND_URL: ""
+        VITE_AUTO_START_AUDIO: "false"
+      cache_from:
+        - ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-frontend:latest
+      labels:
+        org.opencontainers.image.title: lofi-radio-frontend
+        org.opencontainers.image.description: Visualizer and admin console for the Twitch lofi radio.
+        org.opencontainers.image.source: https://github.com/w0rxbend/twitch-musicplayer

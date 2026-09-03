@@ -1,8 +1,19 @@
+# Build artefacts and local state
 tmp/
+main
 *.db
 *.db-shm
 *.db-wal
 *.bloom
+
+# Local configuration and tooling
 .env
+.env.*
 .air.toml
-main
+config.toml
+
+# Never ship the operator's music into the build context
+music/
+
+# Docs are not needed to compile the binary
+README.md

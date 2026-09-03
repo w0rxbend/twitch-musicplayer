@@ -1,37 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Run the station locally, building both images from the Dockerfiles in this
-# repository.
+# Run the station from images published on Docker Hub. Nothing is built, so
+# this file works on a machine that has never seen the source.
 #
-#   docker compose up -d --build
+#   curl -O https://raw.githubusercontent.com/w0rxbend/twitch-musicplayer/main/docker-compose.hub.yml
+#   MUSIC_DIR=~/Music docker compose -f docker-compose.hub.yml up -d
 #
 # Frontend: http://localhost:3000        Admin: http://localhost:3000/admin
 # Backend:  http://localhost:8080        Swagger: http://localhost:8080/swagger
 #
-# Copy .env.example to .env first if you want to point MUSIC_DIR at your own
-# library or move the published ports.
+# Deploying somewhere other than localhost? Set BASE_URL and BACKEND_URL to the
+# address your browser will use, for example https://radio.example.com:8080.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: lofi-radio
 
 services:
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    image: lofi-radio-backend:local
+    image: ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
-      # Your music, mounted read-only: the service only ever reads it.
       - ${MUSIC_DIR:-./music}:/music:ro
-      # Bloom filter play history, so the rotation survives a restart.
       - bloom-data:/data
     environment:
       PORT: "8080"
       MUSIC_DIR: /music
       BLOOM_PATH: /data/lofi-radio.bloom
-      # Must be the address the *browser* uses, because stream URLs are built
-      # from it and handed to the page.
       BASE_URL: ${BASE_URL:-http://localhost:8080}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
@@ -42,19 +37,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        # Baked in at build time. Leave empty to resolve the backend at runtime
-        # instead, from BACKEND_URL or from the host that served the page.
-        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-}
-        VITE_AUTO_START_AUDIO: ${VITE_AUTO_START_AUDIO:-false}
-    image: lofi-radio-frontend:local
+    image: ${DOCKERHUB_NAMESPACE:-worxbend}/lofi-radio-frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     environment:
-      # Overrides the build-time value without rebuilding. Empty is fine.
+      # The published image has no backend URL compiled in. Leave this empty and
+      # the page uses the host it was served from on port 8080; set it when the
+      # backend lives somewhere else, or behind TLS.
       BACKEND_URL: ${BACKEND_URL:-}
     depends_on:
       backend:
