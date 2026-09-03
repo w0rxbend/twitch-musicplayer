@@ -151,14 +151,28 @@ track and starts playing. 🎶
 Every route is a standalone page built to be a **browser source**. Add the URL to OBS,
 size it, done.
 
-| Route | Vibe | Background |
-|:--|:--|:--|
-| `/` | 🌧️ Full lofi rain scene, now-playing card, progress bar, clock | Opaque |
-| `/overlay` | 🪟 Same scene, chrome stripped out | Opaque |
-| `/logo-overlay` | ✨ Logo only, for corner placement | **Transparent** |
-| `/spectrum` | 📊 Glowing oscilloscope waveform + "On Air" badge | Opaque |
-| `/spectrum-overlay` | 🎛️ Bare waveform, chroma-free | **Transparent** |
-| `/admin.html` | 🎚️ Library browser, live queue, skip & play-now | Opaque |
+| Route | Vibe |
+|:--|:--|
+| `/scenes` | 🎨 **Scene picker** — every visualizer with copyable OBS links |
+| `/` | 🌧️ Full lofi rain scene, now-playing card, progress bar, clock |
+| `/overlay` | 🪟 Same scene, chrome stripped out |
+| `/logo-overlay` | ✨ Logo only, for corner placement |
+| `/admin` | 🎚️ Library browser, live queue, skip & play-now |
+
+**Seven audio-reactive scenes**, each with a transparent `-overlay` twin:
+
+| Route | Look |
+|:--|:--|
+| `/spectrum` | 〰️ Glowing oscilloscope trace, cyan and magenta split |
+| `/bars` | 📊 Rounded equaliser columns with peak-hold caps |
+| `/mirror` | 🌊 Dense mirrored bars — the audio-editor waveform |
+| `/dots` | ⣿ Halftone dot columns lit outward from the axis |
+| `/ribbon` | 🎗️ Smooth gradient blob that flows rather than flickers |
+| `/line` | 📈 Sharp polyline with a colour sweep along its length |
+| `/lens` | 💠 Overlapping mirrored diamonds, level-meter coloured |
+
+Recolour any of them with `?ramp=SPECTRUM|AURORA|EMBER|NEON|VU` — for example
+`/bars?ramp=EMBER`.
 
 > 💡 **Pro tip:** append `?transparent=1` to force transparency on any spectrum route, and
 > `?autoplay=1` to bypass the browser's user-gesture requirement. Inside OBS, autoplay is

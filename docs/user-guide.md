@@ -49,21 +49,50 @@ queue automatically. No restart, no import step. 🪄
 ## 🎬 Choosing a Scene
 
 There is no in-page settings panel. Each visual style is its own route, so you pick one by
-opening the matching URL.
+opening the matching URL. Open **`/scenes`** for a picker that lists them all with
+copyable links.
 
-| Route | What you get | Background |
+| Scene | Route | Look |
+|:--|:--|:--|
+| 〰️ Oscilloscope | `/spectrum` | Single glowing trace with a cyan and magenta split |
+| 📊 Equaliser | `/bars` | Rounded columns with peak-hold caps and a reflection |
+| 🌊 Mirror Wave | `/mirror` | Dense mirrored bars — the audio-editor waveform |
+| ⣿ Dot Matrix | `/dots` | Halftone columns of dots lit outward from the axis |
+| 🎗️ Ribbon | `/ribbon` | Smooth gradient-filled blob that flows rather than flickers |
+| 📈 Trace | `/line` | Sharp polyline with a colour sweep along its length |
+| 💠 Facets | `/lens` | Overlapping mirrored diamonds, coloured like a level meter |
+
+Every scene also has a **transparent** twin at `/<name>-overlay` — `/bars-overlay`,
+`/mirror-overlay` and so on — with no background and no text, for compositing over other
+sources in OBS.
+
+Plus the two original pages:
+
+| Route | Look | Background |
 |:--|:--|:--:|
 | `/` | 🌧️ Full lofi rain scene with now-playing card, progress bar and clock | Opaque |
 | `/overlay` | 🪟 The same scene with the chrome removed | Opaque |
 | `/logo-overlay` | ✨ Logo only | **Transparent** |
-| `/spectrum` | 📊 Glowing oscilloscope waveform with an "On Air" badge | Opaque |
-| `/spectrum-overlay` | 🎛️ The waveform alone | **Transparent** |
 
-Two query parameters work on any route:
+### 🎨 Recolouring
+
+Add `?ramp=` to any scene to change its palette:
+
+| Ramp | Colours |
+|:--|:--|
+| `SPECTRUM` | Full rainbow sweep, pink through orange |
+| `AURORA` | Cyan → green → yellow → coral |
+| `EMBER` | Amber → orange → deep magenta |
+| `NEON` | Cyan → indigo → violet |
+| `VU` | Level-meter green → amber → red |
+
+For example `/bars?ramp=EMBER` or `/mirror-overlay?ramp=NEON`.
+
+Two more query parameters work everywhere:
 
 | Parameter | Effect |
 |:--|:--|
-| `?transparent=1` | Force a transparent background on the spectrum routes |
+| `?transparent=1` | Force a transparent background on any scene |
 | `?autoplay=1` | Start audio without waiting for a click |
 
 ## 📺 Using It In OBS

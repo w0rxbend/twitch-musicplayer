@@ -90,9 +90,42 @@ The frontend starts at `http://localhost:3000`.
 - `src/components/Stage.tsx`: Pixi application lifecycle and the ticker; takes a
   visualizer factory so each page can mount a different scene.
 - `src/components/PlayerUI.tsx`: now-playing card, progress bar, clock, live badge.
+- `src/viz/scenes.ts`: the scene catalogue. Adding a row here routes the scene,
+  lists it on `/scenes` and documents it — there is no second place to update.
+- `src/viz/WaveScene.ts`: shared base for the waveform and spectrum scenes.
+  Owns the Pixi lifecycle, the backdrop and the bloom layer; subclasses only
+  implement `draw()`.
+- `src/viz/palette.ts`: the colour ramps, selectable per page with `?ramp=`.
 - `src/viz/LofiRainVisualizer.ts`: the default rain scene.
-- `src/viz/OscilloscopeVisualizer.ts`: the spectrum waveform scene.
-- `src/viz/types.ts`: the `Visualizer` interface every scene implements.
+- `src/viz/OscilloscopeVisualizer.ts`, `BarSpectrumVisualizer.ts`,
+  `MirrorWaveVisualizer.ts`, `DotMatrixVisualizer.ts`, `RibbonVisualizer.ts`,
+  `LineWaveVisualizer.ts`, `LensWaveVisualizer.ts`: the individual scenes.
+- `src/viz/types.ts`: the `Visualizer` interface and the `AudioFrame` contract.
+
+> [!IMPORTANT]
+> `WaveScene` deliberately does not call its own `onResize()` hook from its
+> constructor. A subclass's fields are not initialised until after `super()`
+> returns, so an override touching subclass state would read `undefined`. The
+> first `update()` primes it instead.
+
+### 🎚️ Audio analysis
+
+`src/audio/AudioAnalysisEngine.ts` turns raw analyser output into series that
+are actually drawable, and every scene reads from it rather than touching an
+`AnalyserNode`. It fixes three things about raw FFT data:
+
+- **Log-spaced bands.** FFT bins are linear in frequency, so half a linear
+  spectrum covers 11–22 kHz where there is nothing to see. Bands are spaced by
+  octave instead, giving bass and treble equal screen width.
+- **Tilt.** Musical energy falls off steeply with frequency, so an untreated
+  spectrum looks like a cliff. About +4.5 dB per octave flattens it.
+- **Envelope reduction.** Time-domain data is reduced to per-bucket minimum and
+  maximum, not sampled every Nth point. Point sampling aliases badly: a loud
+  steady tone becomes a thin flickering line, because each sample lands wherever
+  the oscillation happens to be rather than at its extreme.
+
+The two reductions live in `src/audio/analysisMath.ts` as pure functions so they
+can be tested without a browser or an audio device.
 
 ## 🔄 Backend Playback Flow
 
@@ -162,9 +195,13 @@ gofmt -l internal cmd   # should print nothing
 
 ```bash
 cd frontend
+npm test                # analysis maths, via node --test
 npx tsc --noEmit        # typecheck only
 npm run build           # typecheck + production bundle
 ```
+
+Frontend tests run in plain Node with no test framework and no browser: Node
+executes the TypeScript directly, and the functions under test are pure.
 
 > [!NOTE]
 > Run the backend tests with `-race`. Both of the concurrency bugs the hub tests cover were
