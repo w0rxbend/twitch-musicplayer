@@ -29,6 +29,118 @@ html.logo-overlay-page #root {
 html.spectrum-page,
 html.spectrum-page body { background: #02030a; }
 
+/* Every other visualizer scene: the dark slate of the reference artwork. */
+html.scene-page,
+html.scene-page body { background: #121722; }
+
+/* ── Scene index (/scenes) ─────────────────────────────── */
+html.scenes-index-page,
+html.scenes-index-page body {
+  background: #0d1117;
+  overflow: auto;
+}
+html.scenes-index-page #root { min-height: 100%; }
+
+.scenes-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 64px) clamp(18px, 4vw, 40px) 64px;
+  color: #e6edf3;
+}
+.scenes-header h1 {
+  margin: 0 0 10px;
+  font-size: clamp(26px, 4vw, 40px);
+  letter-spacing: -0.02em;
+}
+.scenes-header p {
+  margin: 0 0 34px;
+  max-width: 70ch;
+  line-height: 1.6;
+  color: #9aa7b5;
+}
+.scenes-header code {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+
+.scenes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.scene-card {
+  background: #161b22;
+  border: 1px solid #262d36;
+  border-radius: 14px;
+  padding: 20px;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+.scene-card:hover {
+  border-color: #3d7dff;
+  transform: translateY(-2px);
+}
+.scene-card-icon { font-size: 28px; line-height: 1; }
+.scene-card h2 {
+  margin: 10px 0 6px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.scene-card p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #8b98a5;
+  min-height: 3.1em;
+}
+
+.scene-links { display: flex; gap: 8px; margin-bottom: 12px; }
+.scene-open {
+  flex: 1;
+  text-align: center;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #3d7dff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.scene-open--ghost {
+  background: transparent;
+  border: 1px solid #303844;
+  color: #b9c4d0;
+}
+.scene-open:hover { filter: brightness(1.12); }
+
+.scene-urls { display: flex; flex-direction: column; gap: 5px; }
+.scene-url {
+  all: unset;
+  cursor: pointer;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: #6e7c8a;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+.scene-url:hover { color: #9fd0ff; background: rgba(61, 125, 255, 0.1); }
+
+.scenes-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #21262d;
+  font-size: 12px;
+  color: #6e7c8a;
+}
+.scenes-footer a { color: #58a6ff; text-decoration: none; }
+
 /* ── Spectrum page chrome ──────────────────────────────── */
 #spectrum-chrome {
   position: fixed; inset: 0; z-index: 10; pointer-events: none;
