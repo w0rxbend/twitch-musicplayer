@@ -1,10 +1,22 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # ⚡ Performance Notes
 
-## Rendering Target
+### *Where the frames and the milliseconds actually go.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · [🌐 API](api.md) · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
+
+## 🎯 Rendering Target
 
 The frontend targets 60 fps WebGL rendering.
 
-## Current Optimizations
+## ⚙️ Current Optimizations
 
 - Pixi is initialized with WebGL preference.
 - GPU mode is set to high performance.
@@ -17,7 +29,7 @@ The frontend targets 60 fps WebGL rendering.
 - Fluid and wave drawing reuse typed arrays instead of allocating arrays every frame.
 - Backend audio streams feed the analyser directly, avoiding JavaScript MP3 buffering.
 
-## Profiling
+## 🔬 Profiling
 
 Use browser dev tools:
 
@@ -27,7 +39,7 @@ Use browser dev tools:
 4. Check GPU/compositor load.
 5. Compare frame time against the 16.7 ms budget for 60 fps.
 
-## Expensive Features
+## 💸 Expensive Features
 
 These settings affect frame time most:
 
@@ -37,7 +49,7 @@ These settings affect frame time most:
 - Scene complexity, especially space with more stars.
 - Device pixel ratio.
 
-## Tuning Advice
+## 🎚️ Tuning Advice
 
 For lower-end devices:
 

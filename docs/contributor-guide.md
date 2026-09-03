@@ -1,6 +1,18 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 🤝 Contributor Guide
 
-## Development Principles
+### *Conventions and expectations before you open a pull request.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · [🌐 API](api.md) · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
+
+## 🧭 Development Principles
 
 - Keep backend playback behavior authoritative and explicit.
 - Keep frontend playback backend-only.
@@ -9,7 +21,7 @@
 - Add focused tests for queue, history, repository, and protocol behavior when changing backend semantics.
 - Avoid visible UI controls that conflict with the current passive visualizer experience.
 
-## Branch Workflow
+## 🌿 Branch Workflow
 
 1. Create a feature branch.
 2. Keep backend and frontend changes scoped.
@@ -17,7 +29,7 @@
 4. Update docs when behavior or configuration changes.
 5. Include known limitations in the PR description if a requirement is partially implemented.
 
-## Suggested PR Checklist
+## ✅ Suggested PR Checklist
 
 - `go test ./...` passes in `backend/`.
 - `npm run build` passes in `frontend/`.
@@ -26,7 +38,7 @@
 - HTTP endpoint changes are reflected in `docs/api.md`.
 - User-visible workflow changes are reflected in `docs/user-guide.md`.
 
-## Testing Gaps To Close
+## 🧪 Testing Gaps To Close
 
 High-value tests to add:
 
@@ -37,6 +49,6 @@ High-value tests to add:
 - WebSocket: `need_song -> play_song -> song_finished -> play_song`.
 - Frontend: WebSocket controller message handling with mocked `AudioEngine`.
 
-## Supported Playback Model
+## 🔊 Supported Playback Model
 
 The supported playback model is one active WebSocket client. Do not add frontend flows that create competing playback clients unless the backend protocol is intentionally redesigned.

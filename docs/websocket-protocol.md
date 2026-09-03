@@ -1,4 +1,16 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 🔌 WebSocket Protocol
+
+### *The message contract between the backend DJ and its players.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · [🌐 API](api.md) · **🔌 WebSocket** · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
 
 Endpoint:
 
@@ -6,7 +18,7 @@ Endpoint:
 ws://localhost:8080/ws
 ```
 
-## Message Envelope
+## ✉️ Message Envelope
 
 All messages use:
 
@@ -17,7 +29,7 @@ All messages use:
 }
 ```
 
-## Client To Server
+## 📤 Client To Server
 
 ### `need_song`
 
@@ -49,7 +61,7 @@ Application-level heartbeat.
 {"type":"heartbeat"}
 ```
 
-## Server To Client
+## 📥 Server To Client
 
 ### `play_song`
 
@@ -133,7 +145,7 @@ Sent after connection with a lightweight state snapshot.
 `current_song` is omitted while nothing is playing. The counts are looked up on a context
 detached from the HTTP upgrade request, so they stay accurate after the handler returns.
 
-## Frontend Contract
+## 🤝 Frontend Contract
 
 The frontend:
 
@@ -145,7 +157,7 @@ The frontend:
 
 The frontend does not fetch MP3 bytes into JavaScript. It assigns `stream_url` to a native media element.
 
-## Resilience Contract
+## 🛡️ Resilience Contract
 
 The supported frontend is a single active WebSocket playback client. It is designed to stay connected indefinitely:
 

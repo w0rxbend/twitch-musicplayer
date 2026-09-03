@@ -1,6 +1,18 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 🛠️ Developer Guide
 
-## Prerequisites
+### *Code map, playback flow, and how the pieces fit together.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · **🛠️ Dev** · [🌐 API](api.md) · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
+
+## 📦 Prerequisites
 
 - Go 1.25 or compatible with `backend/go.mod`.
 - Node.js 20+.
@@ -8,7 +20,7 @@
 - No CGO toolchain required: the service uses no database driver.
 - MP3 files for local playback.
 
-## Backend Setup
+## 🎛️ Backend Setup
 
 ```bash
 cd backend
@@ -21,7 +33,7 @@ go run cmd/api/main.go
 
 The backend starts at `http://localhost:8080`.
 
-## Frontend Setup
+## 🖼️ Frontend Setup
 
 ```bash
 cd frontend
@@ -32,7 +44,7 @@ npm run dev
 
 The frontend starts at `http://localhost:3000`.
 
-## Backend Code Map
+## 🗺️ Backend Code Map
 
 - `cmd/api/main.go`: startup, dependency wiring, graceful shutdown.
 - `internal/config`: TOML and environment loading.
@@ -45,7 +57,7 @@ The frontend starts at `http://localhost:3000`.
 - `internal/websocket`: protocol messages, hub, client session loop.
 - `internal/meta`: ID3 metadata extraction.
 
-## Frontend Code Map
+## 🧭 Frontend Code Map
 
 **Entry points** — `src/index.tsx` picks a root component from `window.location.pathname`.
 
@@ -70,7 +82,7 @@ The frontend starts at `http://localhost:3000`.
 - `src/viz/OscilloscopeVisualizer.ts`: the spectrum waveform scene.
 - `src/viz/types.ts`: the `Visualizer` interface every scene implements.
 
-## Backend Playback Flow
+## 🔄 Backend Playback Flow
 
 1. Frontend opens `/ws`.
 2. Frontend sends `need_song`.
@@ -80,11 +92,11 @@ The frontend starts at `http://localhost:3000`.
 6. Frontend sends `song_finished` on media `ended`.
 7. Backend marks the history entry finished and sends the next song.
 
-## Queue Fill Behavior
+## 📥 Queue Fill Behavior
 
 `auto_refill` keeps `min_ahead` automatic songs queued after each selection. `preload` keeps `preload_size` songs queued. Manual queue additions are serialized with playback advancement, and queue position assignment is serialized in the in-memory repository so entries have deterministic ordering.
 
-## WebSocket Resilience
+## 🛡️ WebSocket Resilience
 
 `BackendPlaybackClient` is expected to run continuously:
 
@@ -97,7 +109,7 @@ The frontend starts at `http://localhost:3000`.
 - retries pending playback after a user gesture if autoplay blocks;
 - retries stream playback after media errors.
 
-## Backend-Only Frontend Mode
+## 🔒 Backend-Only Frontend Mode
 
 The frontend intentionally supports only backend streams:
 
@@ -108,7 +120,7 @@ The frontend intentionally supports only backend streams:
 
 This keeps playback state aligned with the backend protocol and avoids competing local audio modes.
 
-## Overlay Routes
+## 🪟 Overlay Routes
 
 `src/index.tsx` selects a root component by pathname:
 
@@ -127,21 +139,28 @@ also add `logo-overlay-page`, which drops the page background so OBS can composi
 canvas over other sources. Both classes are removed on cleanup, so switching routes in a
 single-page session does not leave styling behind.
 
-## Verification
+## ✅ Verification
 
 ```bash
 cd backend
-go test ./...
+go test ./... -race     # queue strategies + websocket hub concurrency
+go vet ./...
+gofmt -l internal cmd   # should print nothing
 ```
 
 ```bash
 cd frontend
-npm run build
+npx tsc --noEmit        # typecheck only
+npm run build           # typecheck + production bundle
 ```
+
+> [!NOTE]
+> Run the backend tests with `-race`. Both of the concurrency bugs the hub tests cover were
+> the kind that only show up under the race detector or under load. 🏁
 
 The frontend build can warn about chunk size because Pixi and filters are large dependencies. That warning does not mean the build failed.
 
-## Performance Work
+## ⚡ Performance Work
 
 The visualizer targets WebGL rendering at 60 fps:
 

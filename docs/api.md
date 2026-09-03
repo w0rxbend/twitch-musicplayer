@@ -1,4 +1,16 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 🌐 Backend API
+
+### *Every HTTP endpoint under `/v1`, with request and response shapes.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · **🌐 API** · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
 
 Base URL:
 
@@ -6,7 +18,7 @@ Base URL:
 http://localhost:8080
 ```
 
-## Health
+## 🩺 Health
 
 ```http
 GET /health
@@ -14,7 +26,7 @@ GET /health
 
 Returns `200` when the HTTP process is alive.
 
-## Songs
+## 🎵 Songs
 
 ```http
 GET /v1/songs
@@ -42,7 +54,7 @@ GET /v1/songs/{id}:stream
 
 Streams MP3 content. The backend uses `http.ServeFile`, so range requests are supported by the standard library.
 
-## Queue
+## 📋 Queue
 
 ```http
 GET /v1/queue
@@ -89,7 +101,7 @@ clients abandon the current track and pull this one immediately.
 
 Queue mutations broadcast `queue_updated` to connected WebSocket clients.
 
-## Player
+## ▶️ Player
 
 ```http
 GET /v1/player
@@ -114,7 +126,7 @@ POST /v1/player:skip
 Broadcasts `skip_now` to every connected audio client. No server-side queue manipulation
 happens here; the usual `need_song` flow performs the dequeue.
 
-## History
+## 🕰️ History
 
 There is no history endpoint. Play history is not stored as records — it is kept in a
 Bloom filter used only to decide what has already been played this cycle. The `history_id`

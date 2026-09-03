@@ -1,4 +1,16 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 📋 Requirement Review
+
+### *Original requirements checked against what shipped.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · [🌐 API](api.md) · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · [🚀 Deploy](deployment.md)
+
+</div>
+
+---
 
 This document reviews the implementation against the original requested behavior.
 
@@ -22,8 +34,10 @@ Implemented under `/v1`:
 
 - Songs.
 - Queue.
-- History.
-- Player summary.
+- Player state and skip.
+
+History was specified but is not implemented as a resource: play history is kept in a Bloom
+filter for selection purposes only, so there are no history records to expose.
 
 Streaming endpoints use resource/action style:
 

@@ -223,6 +223,7 @@ back-to-back — as long as an alternative exists.
 <td width="50%" valign="top">
 
 **🚦 Getting oriented**
+- [📚 Documentation index](docs/README.md)
 - [🗺️ Overview](docs/overview.md)
 - [🎧 User Guide](docs/user-guide.md)
 - [⚙️ Configuration](docs/configuration.md)

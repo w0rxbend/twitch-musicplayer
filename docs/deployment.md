@@ -1,13 +1,25 @@
+<div align="center">
+
+<a href="../README.md"><img src="../frontend/src/assets/worxbend-logo.png" width="72" alt="Lofi Radio" /></a>
+
 # 🚀 Deployment Guide
 
-## Deployment Shape
+### *Getting the station on the air, and keeping it there.*
+
+[🏠 Home](../README.md) · [🗺️ Overview](overview.md) · [🎧 User](user-guide.md) · [🛠️ Dev](developer-guide.md) · [🌐 API](api.md) · [🔌 WebSocket](websocket-protocol.md) · [⚙️ Config](configuration.md) · **🚀 Deploy**
+
+</div>
+
+---
+
+## 🏗️ Deployment Shape
 
 Deploy the backend and frontend as separate services:
 
 - Backend: a single static Go binary plus a mounted MP3 folder. No database service to run.
 - Frontend: static assets built by Vite and served by a static host or reverse proxy.
 
-## Backend Build
+## 🎛️ Backend Build
 
 ```bash
 cd backend
@@ -24,7 +36,7 @@ BASE_URL=https://radio.example.com \
 ./lofi-radio-backend
 ```
 
-## Frontend Build
+## 🖼️ Frontend Build
 
 ```bash
 cd frontend
@@ -33,7 +45,7 @@ VITE_BACKEND_URL=https://radio.example.com npm run build
 
 Serve `frontend/dist` from a static server.
 
-## Reverse Proxy
+## 🔀 Reverse Proxy
 
 A typical proxy should route:
 
@@ -74,7 +86,7 @@ server {
 }
 ```
 
-## Persistent Storage
+## 💾 Persistent Storage
 
 Persist:
 
@@ -83,7 +95,7 @@ Persist:
 
 Do not place these inside ephemeral container layers.
 
-## Security Notes
+## 🔐 Security Notes
 
 The current backend CORS and WebSocket origin handling are permissive for local development. For production:
 
@@ -92,7 +104,7 @@ The current backend CORS and WebSocket origin handling are permissive for local 
 - Add authentication for queue control endpoints if exposed publicly.
 - Consider read-only public song streaming and authenticated queue mutation.
 
-## Operational Notes
+## 🛠️ Operational Notes
 
 - The backend scans the music folder on startup.
 - New files are added on create events.
