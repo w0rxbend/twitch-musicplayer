@@ -12,6 +12,13 @@ export interface AudioFrame {
   timeDomain: Float32Array;  // normalised -1..1, 1024 samples
 }
 
+// Common interface for a full-stage visualizer driven by the Stage ticker.
+export interface Visualizer {
+  update(dt: number): void;
+  resize(): void;
+  dispose(): void;
+}
+
 // Kept for AudioEngine backward compatibility
 export interface AudioBands {
   bass: number;

@@ -3,11 +3,28 @@ import * as PIXI from 'pixi.js';
 import { AudioEngine } from '../audio/AudioEngine';
 import { shouldAutoStartAudio } from '../audio/autoplay';
 import { LofiRainVisualizer } from '../viz/LofiRainVisualizer';
+import type { Visualizer } from '../viz/types';
+
+export interface VisualizerOptions {
+  showBackground: boolean;
+  transparent: boolean;
+}
+
+export type VisualizerFactory = (
+  app: PIXI.Application,
+  audio: AudioEngine,
+  options: VisualizerOptions,
+) => Visualizer;
+
+const defaultVisualizer: VisualizerFactory = (app, audio, options) =>
+  new LofiRainVisualizer(app, audio, { showBackground: options.showBackground });
 
 interface Props {
   onReady: (audio: AudioEngine) => void;
   transparent?: boolean;
   showBackground?: boolean;
+  /** Factory for the visualizer to mount; defaults to LofiRainVisualizer. */
+  createVisualizer?: VisualizerFactory;
 }
 
 export function Stage(props: Props) {
@@ -18,7 +35,7 @@ export function Stage(props: Props) {
     let initialized = false;
     let disposed = false;
     let audio: AudioEngine | null = null;
-    let viz: LofiRainVisualizer | null = null;
+    let viz: Visualizer | null = null;
     let ro: ResizeObserver | null = null;
     let tickerUpdate: (() => void) | null = null;
 
@@ -58,8 +75,10 @@ export function Stage(props: Props) {
       stageRef.appendChild(app.canvas);
 
       audio = new AudioEngine({ allowAutoplay: shouldAutoStartAudio(false) });
-      viz = new LofiRainVisualizer(app, audio, {
+      const makeViz = props.createVisualizer ?? defaultVisualizer;
+      viz = makeViz(app, audio, {
         showBackground: props.showBackground ?? true,
+        transparent: props.transparent ?? false,
       });
 
       props.onReady(audio);

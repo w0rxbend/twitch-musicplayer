@@ -25,6 +25,60 @@ html.logo-overlay-page #root {
   background: transparent;
 }
 
+/* Spectrum page: deep black so the neon waveform pops (matches the artwork). */
+html.spectrum-page,
+html.spectrum-page body { background: #02030a; }
+
+/* ── Spectrum page chrome ──────────────────────────────── */
+#spectrum-chrome {
+  position: fixed; inset: 0; z-index: 10; pointer-events: none;
+  padding: clamp(18px, 3.2vw, 40px);
+}
+
+.spec-badge {
+  position: absolute; top: clamp(18px, 3.2vw, 40px); left: clamp(18px, 3.2vw, 40px);
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 700 11px/1 var(--mono); letter-spacing: .24em; text-transform: uppercase;
+  padding: 8px 13px; border-radius: 999px;
+  color: rgba(180,200,220,.75);
+  background: rgba(120,140,180,.08);
+  border: 1px solid rgba(120,150,190,.2);
+  backdrop-filter: blur(8px);
+  transition: color .4s ease, border-color .4s ease, background .4s ease;
+}
+.spec-badge--live {
+  color: #9af5ff;
+  background: rgba(46,230,246,.12);
+  border-color: rgba(46,230,246,.4);
+}
+.spec-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #4a5568; box-shadow: none; transition: all .4s ease;
+}
+.spec-badge--live .spec-dot {
+  background: #2ee6f6; box-shadow: 0 0 10px #2ee6f6, 0 0 20px rgba(46,230,246,.6);
+  animation: blink 1.8s ease-in-out infinite;
+}
+
+.spec-now {
+  position: absolute; left: 50%; bottom: clamp(30px, 7vh, 74px);
+  transform: translate(-50%, 14px);
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  text-align: center;
+  opacity: 0; transition: opacity .6s ease, transform .6s cubic-bezier(.2,.8,.2,1);
+}
+.spec-now--show { opacity: 1; transform: translate(-50%, 0); }
+.spec-title {
+  font: 600 clamp(20px, 2.6vw, 30px)/1.1 var(--sans); letter-spacing: .01em;
+  color: #f2f7ff;
+  text-shadow: 0 0 18px rgba(46,230,246,.45), 0 0 40px rgba(225,82,255,.28);
+  max-width: 80vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.spec-artist {
+  font: 700 11px/1 var(--mono); letter-spacing: .28em; text-transform: uppercase;
+  color: rgba(200,180,240,.7);
+}
+
 /* ── Canvas stage ──────────────────────────────────────── */
 #stage {
   position: fixed;
@@ -108,3 +162,29 @@ html.logo-overlay-page #root {
 .np-label { font: 700 10px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
 #np-title { font: 600 20px/1.05 var(--sans); letter-spacing: .01em; color: var(--ink);
             white-space: nowrap; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
+#np-artist { font: 500 13px/1.1 var(--sans); letter-spacing: .02em; color: rgba(238,242,255,.6);
+             white-space: nowrap; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
+
+/* Progress bar under the now-playing title */
+.np-progress { margin-top: 4px; width: clamp(180px, 22vw, 300px); }
+.np-bar {
+  height: 4px; border-radius: 999px; overflow: hidden;
+  background: rgba(255,255,255,.12);
+}
+.np-bar-fill {
+  height: 100%; border-radius: 999px; width: 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 10px rgba(34,211,238,.55);
+  transition: width .18s linear;
+}
+.np-times {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font: 400 11px/1 var(--mono); letter-spacing: .06em; color: rgba(238,242,255,.45);
+}
+
+/* Track-change reveal animation (retriggered from PlayerUI). */
+.np-reveal { animation: npReveal .6s cubic-bezier(.2,.8,.2,1); }
+@keyframes npReveal {
+  0%   { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+  100% { opacity: 1; transform: translateY(0);   filter: blur(0); }
+}
