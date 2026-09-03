@@ -16,6 +16,7 @@ tracks, and renders an audio-reactive visualizer you can drop straight into OBS.
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Solid](https://img.shields.io/badge/SolidJS-1.9-2C4F7C?style=for-the-badge&logo=solid&logoColor=white)](https://www.solidjs.com)
 [![Pixi](https://img.shields.io/badge/Pixi.js-8-E72264?style=for-the-badge&logo=javascript&logoColor=white)](https://pixijs.com)
+[![Docker](https://img.shields.io/badge/Docker-Compose_ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#-quick-start)
 [![Status](https://img.shields.io/badge/Status-Active_Development-F59E0B?style=for-the-badge)](#-roadmap)
 
 <br />
@@ -61,7 +62,60 @@ real frequency data — not a canned animation.
 
 ## ⚡ Quick Start
 
-> **You'll need:** Go 1.25+, Node 20+, and a folder of MP3s. No database. No CGO. No Docker required.
+### 🐳 With Docker (one command)
+
+> **You'll need:** Docker, and a folder of MP3s.
+
+```bash
+git clone https://github.com/w0rxbend/twitch-musicplayer.git
+cd twitch-musicplayer
+MUSIC_DIR=~/Music docker compose up -d --build
+```
+
+That's it. 🎉 The station is on the air:
+
+| | URL |
+|:--|:--|
+| 🎵 Visualizer | http://localhost:3000 |
+| 🎚️ Admin console | http://localhost:3000/admin |
+| 📖 Swagger | http://localhost:8080/swagger |
+
+**Don't want to clone anything?** Run the published images straight from Docker Hub:
+
+```bash
+curl -O https://raw.githubusercontent.com/w0rxbend/twitch-musicplayer/main/docker-compose.hub.yml
+MUSIC_DIR=~/Music docker compose -f docker-compose.hub.yml up -d
+```
+
+<details>
+<summary>🐳 <b>The three compose files, and which one you want</b></summary>
+
+<br />
+
+| File | Job | Images |
+|:--|:--|:--|
+| `docker-compose.yml` | 🏠 Run it locally | Built from the Dockerfiles in this repo |
+| `docker-compose.build.yml` | 🏗️ Build and publish | Tagged and pushed to Docker Hub |
+| `docker-compose.hub.yml` | 🌍 Run it anywhere | Pulled from Docker Hub, no source needed |
+
+Ports and paths are configurable — copy `.env.example` to `.env` and edit. Port 3000 or
+8080 already busy? Set `FRONTEND_PORT` / `BACKEND_PORT` (and match `BASE_URL` to the
+backend port).
+
+The published frontend image has **no backend URL compiled into it**. It resolves one at
+container start from `BACKEND_URL`, falling back to the host that served the page on port
+8080 — so the defaults just work on a remote server, and moving the backend behind TLS
+needs a restart, not a rebuild.
+
+📖 Full details → **[Deployment Guide](docs/deployment.md)**
+
+</details>
+
+---
+
+### 🔧 From source
+
+> **You'll need:** Go 1.25+, Node 20+, and a folder of MP3s. No database. No CGO.
 
 **1️⃣ Start the backend** 🎛️
 
@@ -84,11 +138,8 @@ npm run dev
 
 **3️⃣ Open it** 🚀
 
-| What | Where |
-|:--|:--|
-| 🎵 Main visualizer scene | `http://localhost:3000/` |
-| 🎚️ Admin console | `http://localhost:3000/admin.html` |
-| 📖 Swagger API explorer | `http://localhost:8080/swagger` |
+Same URLs as above: the visualizer on `:3000`, the admin console at `/admin`, Swagger on
+`:8080`.
 
 The station starts itself. The moment a browser connects, it asks the backend for a
 track and starts playing. 🎶

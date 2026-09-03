@@ -12,6 +12,18 @@
 
 ---
 
+## 🐳 Running In Containers
+
+If you only want the app running, not a development loop:
+
+```bash
+docker compose up -d --build
+```
+
+See the [Deployment Guide](deployment.md) for the three compose files and every setting.
+The rest of this page covers running the services directly, which is what you want when
+editing code — the containers do not hot-reload.
+
 ## 📦 Prerequisites
 
 - Go 1.25 or compatible with `backend/go.mod`.
