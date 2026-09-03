@@ -9,6 +9,26 @@ const NEAR_END_THRESHOLD_SECS = DEFAULT_FADE_OUT_MS / 1000 + 0.5; // 3.0s
 // Seconds before end to fire onPrefetch (triggers peek_next + audio preload)
 const PREFETCH_THRESHOLD_SECS = 15;
 const userGestureRequiredMessage = 'audio requires a user gesture';
+const CROSSFADE_CURVE_STEPS = 64;
+
+// Builds an equal-power gain envelope from `from` to `to`. A rising envelope
+// follows sin(s·π/2); a falling one follows cos(s·π/2). Paired rising/falling
+// envelopes keep total power constant across a crossfade.
+function equalPowerCurve(from: number, to: number): Float32Array {
+  const steps = CROSSFADE_CURVE_STEPS;
+  const curve = new Float32Array(steps);
+  const rising = to >= from;
+  const span = to - from;
+  for (let i = 0; i < steps; i++) {
+    const s = i / (steps - 1);
+    const shape = rising ? Math.sin(s * Math.PI / 2) : Math.cos(s * Math.PI / 2);
+    // rising:  from + span*sin  (0→1 shaping)
+    // falling: to  + (-span)*cos (1→0 shaping, so it starts at `from`)
+    curve[i] = rising ? from + span * shape : to - span * shape;
+  }
+  curve[steps - 1] = to;
+  return curve;
+}
 
 interface AudioEngineOptions {
   allowAutoplay?: boolean;
@@ -92,10 +112,11 @@ export class AudioEngine {
     return activation.isActive === true || activation.hasBeenActive === true;
   }
 
-  private _ensureChannel(channel?: PlaybackChannel | null): PlaybackChannel {
+  // Builds one playback channel: an <audio> element wired through its own gain
+  // node into the shared analyser. Two of these allow crossfading.
+  private _createChannel(): PlaybackChannel {
     this._ensureCtx();
     if (!this.ctx || !this.analyser) throw new Error('audio engine disposed');
-    if (channel) return channel;
 
     const audioEl = new Audio();
     audioEl.autoplay = this._allowAutoplay;
@@ -111,12 +132,8 @@ export class AudioEngine {
   }
 
   private _nextChannel(): PlaybackChannel {
-    if (!this._channelA) {
-      this._channelA = this._ensureChannel(this._channelA);
-    }
-    if (!this._channelB) {
-      this._channelB = this._ensureChannel(this._channelB);
-    }
+    this._channelA ??= this._createChannel();
+    this._channelB ??= this._createChannel();
 
     if (!this._activeChannel) return this._channelA;
     return this._activeChannel === this._channelA ? this._channelB : this._channelA;
@@ -134,6 +151,11 @@ export class AudioEngine {
     channel.gain.gain.setValueAtTime(clamped, now);
   }
 
+  // Fades a channel's gain using an equal-power curve. A rising fade follows
+  // sin(t·π/2) and a falling fade follows cos(t·π/2); when the two channels of a
+  // crossfade run together their powers sum to a constant, so there is no dip in
+  // perceived loudness in the middle of the transition (a linear crossfade would
+  // sag by ~6 dB at the midpoint).
   private _fadeChannelTo(channel: PlaybackChannel | null, value: number, durationMs: number): Promise<void> {
     if (!channel || !this.ctx) return Promise.resolve();
 
@@ -141,22 +163,38 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     const durationSec = Math.max(0, durationMs) / 1000;
     const gain = channel.gain.gain;
+    const from = clamp(gain.value, 0, 1);
 
     gain.cancelScheduledValues(now);
-    gain.setValueAtTime(gain.value, now);
-    if (durationSec === 0) {
+    if (durationSec === 0 || Math.abs(clamped - from) < 1e-4) {
       gain.setValueAtTime(clamped, now);
       return Promise.resolve();
     }
 
-    gain.linearRampToValueAtTime(clamped, now + durationSec);
+    const curve = equalPowerCurve(from, clamped);
+    try {
+      gain.setValueCurveAtTime(curve, now, durationSec);
+    } catch {
+      // setValueCurveAtTime can throw if events overlap; fall back to a ramp.
+      gain.setValueAtTime(from, now);
+      gain.linearRampToValueAtTime(clamped, now + durationSec);
+    }
     return new Promise((resolve) => {
       window.setTimeout(resolve, Math.max(0, Math.ceil(durationMs)));
     });
   }
 
-  private _stopChannel(channel: PlaybackChannel | null) {
+  // Releases a channel's media element and audio graph. Used only by dispose;
+  // _stopChannel is the milder version that keeps the nodes connected for reuse.
+  private _teardownChannel(channel: PlaybackChannel | null) {
     if (!channel) return;
+    this._releaseElement(channel);
+    channel.mediaSource.disconnect();
+    channel.gain.disconnect();
+  }
+
+  // Detaches handlers and the current source from a channel's <audio> element.
+  private _releaseElement(channel: PlaybackChannel) {
     channel._nearEndCleanup?.();
     channel._nearEndCleanup = null;
     channel.audioEl.pause();
@@ -164,6 +202,11 @@ export class AudioEngine {
     channel.audioEl.onerror = null;
     channel.audioEl.removeAttribute('src');
     channel.audioEl.load();
+  }
+
+  private _stopChannel(channel: PlaybackChannel | null) {
+    if (!channel) return;
+    this._releaseElement(channel);
     this._setChannelGain(channel, 0);
   }
 
@@ -274,13 +317,25 @@ export class AudioEngine {
   togglePlay(): boolean {
     const active = this._activeAudioElement();
     if (this.mode === 'backend' && active) {
-      if (active.paused) { active.play(); this.playing = true; }
+      if (active.paused) {
+        void active.play().catch(() => { this.playing = false; });
+        this.playing = true;
+      }
       else {
         active.pause();
         this.playing = false;
       }
     }
     return this.playing;
+  }
+
+  // Returns the active track's playback position, or null when nothing is loaded.
+  // duration is 0 while the stream's metadata has not yet loaded.
+  getPlaybackProgress(): { currentTime: number; duration: number } | null {
+    const el = this._activeAudioElement();
+    if (!el || this.mode !== 'backend') return null;
+    const duration = Number.isFinite(el.duration) ? el.duration : 0;
+    return { currentTime: el.currentTime || 0, duration };
   }
 
   private _synth(dt: number, intensity: number) {
@@ -377,28 +432,8 @@ export class AudioEngine {
     this.hasUserSource = false;
     this.sourceName = '';
 
-    if (this._channelA) {
-      this._channelA._nearEndCleanup?.();
-      this._channelA._nearEndCleanup = null;
-      this._channelA.audioEl.pause();
-      this._channelA.audioEl.onended = null;
-      this._channelA.audioEl.onerror = null;
-      this._channelA.audioEl.removeAttribute('src');
-      this._channelA.audioEl.load();
-      this._channelA.mediaSource.disconnect();
-      this._channelA.gain.disconnect();
-    }
-    if (this._channelB) {
-      this._channelB._nearEndCleanup?.();
-      this._channelB._nearEndCleanup = null;
-      this._channelB.audioEl.pause();
-      this._channelB.audioEl.onended = null;
-      this._channelB.audioEl.onerror = null;
-      this._channelB.audioEl.removeAttribute('src');
-      this._channelB.audioEl.load();
-      this._channelB.mediaSource.disconnect();
-      this._channelB.gain.disconnect();
-    }
+    this._teardownChannel(this._channelA);
+    this._teardownChannel(this._channelB);
     this._channelA = null;
     this._channelB = null;
     this._activeChannel = null;
