@@ -113,21 +113,22 @@ func Load() *Config {
 	return cfg
 }
 
+// expandHomePath rewrites a leading "~" into the user's home directory, e.g.
+// "~/Music" becomes "/home/alice/Music". Anything else is returned unchanged,
+// as is "~" itself when the home directory cannot be determined.
 func expandHomePath(path string) string {
-	if path == "" || path == "~" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			if path == "~" {
-				return home
-			}
-		}
+	isHome := path == "~"
+	isUnderHome := strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`)
+	if !isHome && !isUnderHome {
 		return path
 	}
 
-	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, path[2:])
-		}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
 	}
-
-	return path
+	if isHome {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }

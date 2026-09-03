@@ -1,8 +1,10 @@
 package repository
 
-import "context"
+import (
+	"context"
 
-import "lofi-radio-backend/internal/models"
+	"lofi-radio-backend/internal/models"
+)
 
 // SongRepository defines persistence operations for songs.
 type SongRepository interface {

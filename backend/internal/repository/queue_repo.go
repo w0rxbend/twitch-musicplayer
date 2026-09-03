@@ -1,8 +1,10 @@
 package repository
 
-import "context"
+import (
+	"context"
 
-import "lofi-radio-backend/internal/models"
+	"lofi-radio-backend/internal/models"
+)
 
 // QueueRepository defines persistence operations for the playback queue.
 type QueueRepository interface {
