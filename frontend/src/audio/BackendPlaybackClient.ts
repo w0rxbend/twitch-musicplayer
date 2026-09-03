@@ -1,4 +1,5 @@
 import type { AudioEngine } from './AudioEngine';
+import { getWebSocketURL, resolveStreamURL } from '../config/backend';
 
 type MessageType =
   | 'need_song'
@@ -411,22 +412,4 @@ function isErrorPayload(value: unknown): value is ErrorPayload {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function getBackendURL() {
-  const configured = import.meta.env.VITE_BACKEND_URL as string | undefined;
-  if (configured) return configured.replace(/\/$/, '');
-  return `${window.location.protocol}//${window.location.hostname}:8080`;
-}
-
-function getWebSocketURL() {
-  const base = new URL(getBackendURL());
-  base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
-  base.pathname = '/ws';
-  base.search = '';
-  return base.toString();
-}
-
-function resolveStreamURL(url: string) {
-  return new URL(url, getBackendURL()).toString();
 }
