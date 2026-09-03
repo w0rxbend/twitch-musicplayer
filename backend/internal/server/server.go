@@ -50,10 +50,19 @@ func buildRoutes(opts Options) http.Handler {
 		MaxAge:           300,
 	}))
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+	// HEAD is registered alongside GET because probes commonly use it —
+	// `wget --spider` and most load balancers send HEAD, and chi would
+	// otherwise answer 405 and report a healthy service as down.
+	health := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "up"}) //nolint:errcheck
-	})
+	}
+	r.Get("/health", health)
+	r.Head("/health", health)
 
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		websocket.ServeWS(opts.Hub, opts.QueueMgr, opts.BaseURL, opts.StateTracker, w, r)
