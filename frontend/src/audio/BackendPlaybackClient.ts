@@ -37,9 +37,28 @@ interface ErrorPayload {
 
 export interface SongInfo { title: string; artist?: string }
 
+/** Health of the WebSocket link to the backend. */
+export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
+
+/** What the audio element is currently doing. */
+export type PlaybackStatus = 'idle' | 'playing' | 'blocked' | 'error';
+
+/**
+ * Connection health and playback health are independent — the socket can be
+ * healthy while audio is blocked by autoplay policy, and vice versa. They are
+ * reported as separate fields so callers switch on a value instead of
+ * pattern-matching a human-readable string.
+ */
+export interface RadioStatus {
+  connection: ConnectionStatus;
+  playback: PlaybackStatus;
+  /** Human-readable detail, for logs and tooltips only. */
+  message: string;
+}
+
 interface BackendPlaybackOptions {
   audio: AudioEngine;
-  onStatus?: (status: string) => void;
+  onStatus?: (status: RadioStatus) => void;
   onSongChange?: (song: SongInfo | null) => void;
 }
 
@@ -65,7 +84,7 @@ const messageTypes = new Set<MessageType>([
 
 export class BackendPlaybackClient {
   private audio: AudioEngine;
-  private onStatus?: (status: string) => void;
+  private onStatus?: (status: RadioStatus) => void;
   private onSongChange?: (song: SongInfo | null) => void;
   private socket: WebSocket | null = null;
   private reconnectTimer = 0;
@@ -80,11 +99,23 @@ export class BackendPlaybackClient {
   private connecting = false;
   private streamRetryTimer = 0;
   private errorRetryTimer = 0;
+  private connection: ConnectionStatus = 'disconnected';
+  private playback: PlaybackStatus = 'idle';
 
   constructor(options: BackendPlaybackOptions) {
     this.audio = options.audio;
     this.onStatus = options.onStatus;
     this.onSongChange = options.onSongChange;
+  }
+
+  /** Records the latest status and notifies the listener. */
+  private report(
+    change: { connection?: ConnectionStatus; playback?: PlaybackStatus },
+    message: string,
+  ) {
+    if (change.connection) this.connection = change.connection;
+    if (change.playback) this.playback = change.playback;
+    this.onStatus?.({ connection: this.connection, playback: this.playback, message });
   }
 
   start() {
@@ -112,6 +143,7 @@ export class BackendPlaybackClient {
     }
     this.socket = null;
     this.connecting = false;
+    this.report({ connection: 'disconnected', playback: 'idle' }, 'radio stopped');
     this.onSongChange?.(null);
   }
 
@@ -133,7 +165,7 @@ export class BackendPlaybackClient {
     socket.onopen = () => {
       this.connecting = false;
       this.reconnectAttempts = 0;
-      this.onStatus?.('radio connected');
+      this.report({ connection: 'connected' }, 'radio connected');
       this.flushOutbox();
       if (!this.current && !this.pendingPlay && !this.awaitingSong) this.requestSong();
       window.clearInterval(this.heartbeatTimer);
@@ -157,13 +189,17 @@ export class BackendPlaybackClient {
       this.connecting = false;
       window.clearInterval(this.heartbeatTimer);
       if (this.socket === socket) this.socket = null;
-      if (this.shouldRun) this.scheduleReconnect();
+      if (this.shouldRun) {
+        this.report({ connection: 'reconnecting' }, 'radio disconnected');
+        this.scheduleReconnect();
+      } else {
+        this.report({ connection: 'disconnected', playback: 'idle' }, 'radio stopped');
+      }
     };
 
     socket.onerror = () => {
       this.connecting = false;
-      this.onStatus?.('radio connection error');
-      this.reconnectNow();
+      this.reconnectNow('radio connection error');
     };
   }
 
@@ -201,7 +237,7 @@ export class BackendPlaybackClient {
       case 'error':
         if (msg.payload !== undefined && !isErrorPayload(msg.payload)) return;
         this.awaitingSong = false;
-        this.onStatus?.(msg.payload?.message ?? 'radio error');
+        this.report({ playback: 'error' }, msg.payload?.message ?? 'radio error');
         window.clearTimeout(this.errorRetryTimer);
         this.errorRetryTimer = window.setTimeout(() => {
           if (this.shouldRun && !this.current && !this.pendingPlay && !this.awaitingSong) this.requestSong();
@@ -227,9 +263,12 @@ export class BackendPlaybackClient {
       this.pendingPlay = null;
       window.clearTimeout(this.streamRetryTimer);
       this.onSongChange?.({ title: songName, artist: payload.song.artist });
-      this.onStatus?.('playing');
+      this.report({ playback: 'playing' }, 'playing');
     } catch {
-      this.onStatus?.(this.audio.allowAutoplay ? 'audio autoplay blocked' : 'click anywhere to start audio');
+      this.report(
+        { playback: 'blocked' },
+        this.audio.allowAutoplay ? 'audio autoplay blocked' : 'click anywhere to start audio',
+      );
     }
   }
 
@@ -244,12 +283,17 @@ export class BackendPlaybackClient {
   // which detects the pre-buffered URL on the inactive channel and starts near-instantly.
   private handleNearEnd(payload: PlaySongPayload) {
     if (this.current?.history_id !== payload.history_id && this.pendingPlay?.history_id !== payload.history_id) return;
-    this.awaitingSong = true; // prevent queue_updated from firing a duplicate need_song
-    this.finishCurrent(payload);
+    // awaitingSong is latched by finishCurrent, and only once it has actually
+    // sent song_finished. Setting it here instead would strand the client
+    // whenever finishCurrent returned early at its own guard: every recovery
+    // path checks !awaitingSong, so nothing would ever request a song again.
+    this.finishCurrent(payload, { awaitReplacement: true });
   }
 
-  private finishCurrent(payload: PlaySongPayload) {
+  private finishCurrent(payload: PlaySongPayload, options: { awaitReplacement?: boolean } = {}) {
     if (this.current?.history_id !== payload.history_id) return;
+    // Set before sending so a synchronous reply cannot clear it first.
+    if (options.awaitReplacement) this.awaitingSong = true;
     this.current = null;
     this.onSongChange?.(null);
     this.queueOrSend({
@@ -271,7 +315,7 @@ export class BackendPlaybackClient {
     this.pendingPlay = payload;
     this.current = null;
     this.onSongChange?.(null);
-    this.onStatus?.('stream error, retrying');
+    this.report({ playback: 'error' }, 'stream error, retrying');
     window.clearTimeout(this.streamRetryTimer);
     this.streamRetryTimer = window.setTimeout(() => {
       if (this.shouldRun) void this.play(payload);
@@ -301,9 +345,9 @@ export class BackendPlaybackClient {
     for (const msg of pending) this.send(msg);
   }
 
-  private reconnectNow(status?: string) {
+  private reconnectNow(reason = 'radio reconnecting') {
     if (!this.shouldRun) return;
-    if (status) this.onStatus?.(status);
+    this.report({ connection: 'reconnecting' }, reason);
     window.clearInterval(this.heartbeatTimer);
     window.clearTimeout(this.reconnectTimer);
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
@@ -315,12 +359,11 @@ export class BackendPlaybackClient {
   }
 
   private handleOnline = () => {
-    this.onStatus?.('network online');
-    this.reconnectNow();
+    this.reconnectNow('network online');
   };
 
   private handleOffline = () => {
-    this.onStatus?.('network offline');
+    this.report({ connection: 'disconnected' }, 'network offline');
     window.clearInterval(this.heartbeatTimer);
   };
 
