@@ -23,7 +23,7 @@ type SongRepository interface {
 
 // QueueManager is the subset needed by the watcher.
 type QueueManager interface {
-	AddToQueue(ctx context.Context, songID string, source models.QueueSource) error
+	AddToQueue(ctx context.Context, songID string, source models.QueueSource) (*models.QueueItem, error)
 }
 
 // OnNewSong is called after a newly discovered song is registered.
@@ -83,7 +83,10 @@ func New(dir string, extensions []string, songRepo SongRepository, queueMgr Queu
 func (w *Watcher) ScanExisting(ctx context.Context) (*ScanSummary, error) {
 	summary := &ScanSummary{}
 	err := filepath.WalkDir(w.dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || ctx.Err() != nil {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if d.IsDir() {
@@ -220,7 +223,7 @@ func (w *Watcher) registerFile(ctx context.Context, path string, addToQueue bool
 	w.logger.Printf("indexed: %s (%.0fs)", song.Title, song.DurationSecs)
 
 	if addToQueue {
-		if err := w.queueMgr.AddToQueue(ctx, song.ID, models.QueueSourceAuto); err != nil {
+		if _, err := w.queueMgr.AddToQueue(ctx, song.ID, models.QueueSourceAuto); err != nil {
 			w.logger.Printf("queue %s: %v", song.Filename, err)
 		}
 		if w.onNewSong != nil {

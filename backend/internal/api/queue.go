@@ -14,10 +14,10 @@ import (
 )
 
 type queueManager interface {
-	AddToQueue(ctx context.Context, songID string, source models.QueueSource) error
+	AddToQueue(ctx context.Context, songID string, source models.QueueSource) (*models.QueueItem, error)
 	PlayNext(ctx context.Context, songID string) error
 	ListQueue(ctx context.Context) ([]*models.QueueItem, error)
-	SkipCurrent(ctx context.Context) (*models.Song, error)
+	NextSong(ctx context.Context) (*models.Song, error)
 	ClearQueue(ctx context.Context) error
 }
 
@@ -76,7 +76,11 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.mgr.AddToQueue(r.Context(), req.SongID, models.QueueSourceManual); err != nil {
+	// The manager returns the entry it created. Reading back the tail of the
+	// queue instead would be wrong under the auto_refill strategy, which
+	// appends further auto-picked songs behind the manual one.
+	item, err := h.mgr.AddToQueue(r.Context(), req.SongID, models.QueueSourceManual)
+	if err != nil {
 		if errors.Is(err, queuemgr.ErrSongNotFound) {
 			writeError(w, http.StatusNotFound, "song not found")
 			return
@@ -85,14 +89,8 @@ func (h *QueueHandler) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.mgr.ListQueue(r.Context())
-	if err != nil || len(items) == 0 {
-		w.WriteHeader(http.StatusCreated)
-		return
-	}
-
 	h.broadcastQueueUpdated(r.Context(), "song_added")
-	writeJSON(w, http.StatusCreated, items[len(items)-1])
+	writeJSON(w, http.StatusCreated, item)
 }
 
 // Remove handles DELETE /v1/queue/{id}.
@@ -108,7 +106,7 @@ func (h *QueueHandler) Remove(w http.ResponseWriter, r *http.Request) {
 
 // Skip handles POST /v1/queue:skip.
 func (h *QueueHandler) Skip(w http.ResponseWriter, r *http.Request) {
-	song, err := h.mgr.SkipCurrent(r.Context())
+	song, err := h.mgr.NextSong(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to skip current song")
 		return
