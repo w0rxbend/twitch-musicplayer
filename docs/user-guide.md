@@ -1,4 +1,4 @@
-# User Guide
+# 🎧 User Guide
 
 ## What This App Does
 
@@ -10,7 +10,6 @@ The app plays MP3 files from the backend music folder and renders a lofi visuali
 2. Start the frontend.
 3. Open `http://localhost:3000`.
 4. If the browser blocks autoplay, click or tap anywhere once.
-5. Press `T` to open or close visual tweaks.
 
 ## Adding Music
 
@@ -22,21 +21,24 @@ backend/music
 
 Existing files are scanned when the backend starts. Newly created files are detected while the backend is running and added to the queue automatically.
 
-## Visual Tweaks
+## Choosing a Scene
 
-Press `T` to open the tweaks panel. Available settings include:
+There is no in-page settings panel. Each visual style is its own route, so you pick one by
+opening the matching URL:
 
-- Palette.
-- Color cycling.
-- Scene.
-- Intensity.
-- Bass response.
-- Bloom.
-- Chromatic split.
-- Particle density.
-- Overlay visibility.
+| Route | What you get |
+|:--|:--|
+| `/` | Full lofi rain scene with now-playing card, progress bar and clock |
+| `/overlay` | The same scene with the chrome removed |
+| `/logo-overlay` | Logo only, on a transparent background |
+| `/spectrum` | Glowing oscilloscope waveform with an "On Air" badge |
+| `/spectrum-overlay` | The waveform alone, on a transparent background |
 
-The visible load/microphone/play buttons have intentionally been removed. The top-right chrome shows the current backend-provided song name under the clock.
+Add `?transparent=1` to force transparency on a spectrum route, or `?autoplay=1` to start
+audio without waiting for a click.
+
+The visible load/microphone/play buttons have intentionally been removed: playback is the
+backend's decision, not the page's.
 
 ## Logo Overlay
 

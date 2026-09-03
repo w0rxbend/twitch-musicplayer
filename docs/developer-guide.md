@@ -1,11 +1,11 @@
-# Developer Guide
+# 🛠️ Developer Guide
 
 ## Prerequisites
 
 - Go 1.25 or compatible with `backend/go.mod`.
 - Node.js 20+.
 - npm.
-- CGO toolchain for `github.com/mattn/go-sqlite3`.
+- No CGO toolchain required: the service uses no database driver.
 - MP3 files for local playback.
 
 ## Backend Setup
@@ -36,7 +36,8 @@ The frontend starts at `http://localhost:3000`.
 
 - `cmd/api/main.go`: startup, dependency wiring, graceful shutdown.
 - `internal/config`: TOML and environment loading.
-- `internal/database`: SQLite connection and migrations.
+- `internal/repository`: in-memory song and queue stores.
+- `internal/played`: Bloom-filter play-history tracker, persisted to a single file.
 - `internal/repository`: database access for songs, queue, and history.
 - `internal/queue`: song selection, queue operations, history start/finish.
 - `internal/watcher`: startup scan and fsnotify create-event handling.
@@ -46,15 +47,28 @@ The frontend starts at `http://localhost:3000`.
 
 ## Frontend Code Map
 
-- `src/App.tsx`: app lifecycle, backend playback startup, `T` hotkey.
-- `src/audio/BackendPlaybackClient.ts`: WebSocket controller.
-- `src/audio/AudioEngine.ts`: backend stream playback and analyser.
-- `src/components/Stage.tsx`: Pixi application lifecycle.
-- `src/components/LogoOverlayStage.tsx`: transparent Pixi overlay lifecycle.
-- `src/viz/Visualizer.ts`: WebGL visual rendering.
-- `src/viz/LogoOverlayVisualizer.ts`: circular logo overlay renderer.
-- `src/components/TweaksPanel.tsx`: visual tweak controls.
-- `src/components/Chrome.tsx`: minimal live/time overlay.
+**Entry points** — `src/index.tsx` picks a root component from `window.location.pathname`.
+
+- `src/App.tsx`: main scene, wires the playback client to the UI.
+- `src/OverlayApp.tsx`: chrome-free scene for OBS browser sources.
+- `src/SpectrumApp.tsx`: oscilloscope page, opaque or transparent.
+- `src/AdminApp.tsx` / `src/admin.tsx`: admin console (separate `admin.html` bundle).
+
+**Audio**
+
+- `src/audio/BackendPlaybackClient.ts`: WebSocket controller — reconnect, heartbeat,
+  outbox, prebuffering, and the typed `RadioStatus` reported to the UI.
+- `src/audio/AudioEngine.ts`: two-channel playback, equal-power crossfade, FFT analyser.
+- `src/audio/autoplay.ts`: decides whether audio may start without a user gesture.
+
+**Rendering**
+
+- `src/components/Stage.tsx`: Pixi application lifecycle and the ticker; takes a
+  visualizer factory so each page can mount a different scene.
+- `src/components/PlayerUI.tsx`: now-playing card, progress bar, clock, live badge.
+- `src/viz/LofiRainVisualizer.ts`: the default rain scene.
+- `src/viz/OscilloscopeVisualizer.ts`: the spectrum waveform scene.
+- `src/viz/types.ts`: the `Visualizer` interface every scene implements.
 
 ## Backend Playback Flow
 
@@ -68,7 +82,7 @@ The frontend starts at `http://localhost:3000`.
 
 ## Queue Fill Behavior
 
-`auto_refill` keeps `min_ahead` automatic songs queued after each selection. `preload` keeps `preload_size` songs queued. Manual queue additions are serialized with playback advancement, and SQLite queue position assignment is serialized in the repository so entries have deterministic ordering.
+`auto_refill` keeps `min_ahead` automatic songs queued after each selection. `preload` keeps `preload_size` songs queued. Manual queue additions are serialized with playback advancement, and queue position assignment is serialized in the in-memory repository so entries have deterministic ordering.
 
 ## WebSocket Resilience
 
@@ -96,12 +110,22 @@ This keeps playback state aligned with the backend protocol and avoids competing
 
 ## Overlay Routes
 
-The frontend selects the overlay app by pathname:
+`src/index.tsx` selects a root component by pathname:
 
-- `/overlay`
-- `/logo-overlay`
+| Pathname | Component | Transparent |
+|:--|:--|:--|
+| `/` | `App` | no |
+| `/overlay` | `OverlayApp` | no |
+| `/logo`, `/logo-overlay` | `OverlayApp` | yes |
+| `/spectrum` | `SpectrumApp` | no |
+| `/spectrum-overlay` | `SpectrumApp` | yes |
 
-Both routes use `OverlayApp`, `LogoOverlayStage`, and `LogoOverlayVisualizer`. The document body receives `overlay-page`, which makes the page background transparent for compositing.
+`?transparent=1` forces transparency on the spectrum routes.
+
+Overlay routes add the `overlay-page` class to the document element, and transparent ones
+also add `logo-overlay-page`, which drops the page background so OBS can composite the
+canvas over other sources. Both classes are removed on cleanup, so switching routes in a
+single-page session does not leave styling behind.
 
 ## Verification
 

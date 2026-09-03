@@ -1,10 +1,10 @@
-# Deployment Guide
+# 🚀 Deployment Guide
 
 ## Deployment Shape
 
 Deploy the backend and frontend as separate services:
 
-- Backend: Go binary with SQLite database and mounted MP3 folder.
+- Backend: a single static Go binary plus a mounted MP3 folder. No database service to run.
 - Frontend: static assets built by Vite and served by a static host or reverse proxy.
 
 ## Backend Build
@@ -18,7 +18,7 @@ Run:
 
 ```bash
 PORT=8080 \
-BLUEPRINT_DB_URL=/data/lofi-radio.db \
+BLOOM_PATH=/data/lofi-radio.bloom \
 MUSIC_DIR=/data/music \
 BASE_URL=https://radio.example.com \
 ./lofi-radio-backend
@@ -78,7 +78,7 @@ server {
 
 Persist:
 
-- SQLite database path from `BLUEPRINT_DB_URL`.
+- Bloom-filter history path from `BLOOM_PATH` (defaults to `./lofi-radio.bloom`). Mount it on a persistent volume so play history survives restarts.
 - Music folder from `MUSIC_DIR`.
 
 Do not place these inside ephemeral container layers.

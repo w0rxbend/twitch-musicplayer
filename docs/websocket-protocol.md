@@ -1,4 +1,4 @@
-# WebSocket Protocol
+# 🔌 WebSocket Protocol
 
 Endpoint:
 
@@ -123,12 +123,15 @@ Sent after connection with a lightweight state snapshot.
 {
   "type": "state",
   "payload": {
+    "current_song": { "id": "...", "title": "...", "artist": "..." },
     "queue_length": 0,
-    "total_songs": 0,
-    "history_count": 0
+    "total_songs": 0
   }
 }
 ```
+
+`current_song` is omitted while nothing is playing. The counts are looked up on a context
+detached from the HTTP upgrade request, so they stay accurate after the handler returns.
 
 ## Frontend Contract
 

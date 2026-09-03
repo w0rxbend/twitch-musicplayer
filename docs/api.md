@@ -1,4 +1,4 @@
-# Backend API
+# 🌐 Backend API
 
 Base URL:
 
@@ -69,7 +69,7 @@ Removes a queued item.
 POST /v1/queue:skip
 ```
 
-Advances to the next song and records a new history start.
+Advances to the next song and returns it as `{"song": {...}}`.
 
 ```http
 POST /v1/queue:clear
@@ -77,16 +77,17 @@ POST /v1/queue:clear
 
 Clears all pending queue entries.
 
-Queue mutations broadcast `queue_updated` to connected WebSocket clients.
-
-## History
-
 ```http
-GET /v1/history
-GET /v1/history?limit=25
+POST /v1/queue:play-next
+Content-Type: application/json
+
+{"song_id":"SONG_ID"}
 ```
 
-Returns play history. Default limit is `50`; maximum limit is `200`.
+Inserts a song at the front of the queue and broadcasts `skip_now`, so connected audio
+clients abandon the current track and pull this one immediately.
+
+Queue mutations broadcast `queue_updated` to connected WebSocket clients.
 
 ## Player
 
@@ -94,14 +95,27 @@ Returns play history. Default limit is `50`; maximum limit is `200`.
 GET /v1/player
 ```
 
-Returns current aggregate counts:
+Returns the authoritative playback snapshot:
 
 ```json
 {
+  "current_song": { "id": "...", "title": "...", "artist": "..." },
   "queue_length": 0,
-  "total_songs": 0,
-  "history_count": 0
+  "total_songs": 0
 }
 ```
 
-Current limitation: this endpoint does not yet expose one authoritative current song.
+`current_song` is omitted while nothing is playing.
+
+```http
+POST /v1/player:skip
+```
+
+Broadcasts `skip_now` to every connected audio client. No server-side queue manipulation
+happens here; the usual `need_song` flow performs the dequeue.
+
+## History
+
+There is no history endpoint. Play history is not stored as records — it is kept in a
+Bloom filter used only to decide what has already been played this cycle. The `history_id`
+in WebSocket payloads is a per-playback correlation ID, not a stored entity.

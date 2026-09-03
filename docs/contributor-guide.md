@@ -1,4 +1,4 @@
-# Contributor Guide
+# 🤝 Contributor Guide
 
 ## Development Principles
 

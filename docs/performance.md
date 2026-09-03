@@ -1,4 +1,4 @@
-# Performance Notes
+# ⚡ Performance Notes
 
 ## Rendering Target
 

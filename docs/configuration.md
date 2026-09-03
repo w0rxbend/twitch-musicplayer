@@ -1,4 +1,4 @@
-# Configuration
+# ⚙️ Configuration
 
 ## Backend TOML
 
@@ -39,17 +39,23 @@ Example: `backend/.env.example`.
 ```bash
 PORT=8080
 APP_ENV=local
-BLUEPRINT_DB_URL=./lofi-radio.db
+BLOOM_PATH=./lofi-radio.bloom
 MUSIC_DIR=./music
 BASE_URL=http://localhost:8080
 ```
 
 Environment variables override TOML values:
 
-- `PORT`
-- `BLUEPRINT_DB_URL`
-- `MUSIC_DIR`
-- `BASE_URL`
+| Variable | Overrides | Default |
+|:--|:--|:--|
+| `LOFI_CONFIG` | path to the TOML file itself | `config.toml` |
+| `PORT` | `server.port` | `8080` |
+| `BASE_URL` | `server.base_url` | `http://localhost:8080` |
+| `MUSIC_DIR` | `music.dir` | `./music` |
+| `BLOOM_PATH` | `bloom.path` | `./lofi-radio.bloom` |
+
+`APP_ENV` appears in `.env.example` for convention but is not read by the service.
+Shuffle and queue settings are TOML-only — there is no environment override for them.
 
 ## Frontend Environment
 

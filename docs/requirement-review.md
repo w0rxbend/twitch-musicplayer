@@ -1,4 +1,4 @@
-# Requirement Review
+# 📋 Requirement Review
 
 This document reviews the implementation against the original requested behavior.
 
@@ -6,7 +6,7 @@ This document reviews the implementation against the original requested behavior
 
 ### Go backend service
 
-Implemented in `backend/` with Chi, Gorilla WebSocket, SQLite, fsnotify, and ID3 metadata extraction.
+Implemented in `backend/` with Chi, Gorilla WebSocket, an in-memory index with a Bloom-filter history, fsnotify, and ID3 metadata extraction.
 
 ### go-blueprint style setup
 
@@ -64,7 +64,7 @@ Implemented for create events. Newly created files are indexed and added to the 
 
 ### Backend-only frontend mode
 
-Implemented. Local file and microphone modes are removed from the supported frontend code path. Visible load/mic/play/tweaks buttons are removed. Tweaks are toggled with `T`.
+Implemented. Local file and microphone modes are removed from the supported frontend code path. Visible load/mic/play/tweaks buttons are removed. Visual styles are selected by route rather than by an in-page panel.
 
 ### Resilient WebSocket frontend
 
